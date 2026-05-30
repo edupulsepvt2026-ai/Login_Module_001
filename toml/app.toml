@@ -1,0 +1,17 @@
+[app]
+name    = "GoProject"
+version = "1.0.0"
+env     = "development"
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[server.tls]
+enabled   = false
+cert_file = "certs/server.crt"
+key_file  = "certs/server.key"
+
+[log]
+file  = "logs/app.log"
+level = "info"

@@ -1,0 +1,19 @@
+[[routes]]
+path    = "/api/v1/health"
+method  = "GET"
+handler = "HealthHandler"
+
+[[routes]]
+path    = "/api/v1/users"
+method  = "GET"
+handler = "GetUsersHandler"
+
+[[routes]]
+path    = "/api/v1/users"
+method  = "POST"
+handler = "CreateUserHandler"
+
+[[routes]]
+path    = "/api/v1/login"
+method  = "POST"
+handler = "LoginHandler"

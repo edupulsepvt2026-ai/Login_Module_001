@@ -48,15 +48,33 @@ type DBConfig struct {
 type DBSection struct {
 	Server          string `toml:"server"`
 	Port            int    `toml:"port"`
-	Name            string `toml:"name"`
-	User            string `toml:"user"`
-	Password        string `toml:"password"`
+	Name            string // injected from MSSQL_DB_NAME
+	User            string // injected from MSSQL_DB_USER
+	Password        string // injected from MSSQL_DB_PASSWORD
 	Timeout         int    `toml:"timeout"`
 	Encrypt         bool   `toml:"encrypt"`
 	MaxOpenConns    int    `toml:"max_open_conns"`
 	MaxIdleConns    int    `toml:"max_idle_conns"`
 	MaxLifetimeMins int    `toml:"max_lifetime_mins"`
 	MaxIdleTimeMins int    `toml:"max_idle_time_mins"`
+}
+
+// PGConfig holds PostgreSQL connection pool settings.
+type PGConfig struct {
+	MasterDB PGSection `toml:"master_db"`
+}
+
+type PGSection struct {
+	Host                string `toml:"host"`
+	Port                int    `toml:"port"`
+	Name                string // injected from MASTER_DB_NAME
+	User                string // injected from MASTER_DB_USER
+	Password            string // injected from MASTER_DB_PASSWORD
+	MaxConns            int32  `toml:"max_conns"`
+	MinConns            int32  `toml:"min_conns"`
+	MaxConnLifetimeMins int    `toml:"max_conn_lifetime_mins"`
+	MaxConnIdleMins     int    `toml:"max_conn_idle_mins"`
+	ConnectTimeoutSecs  int    `toml:"connect_timeout_secs"`
 }
 
 // RouteEntry represents a single route declaration.
@@ -73,12 +91,14 @@ type RoutesConfig struct {
 
 // Config aggregates all parsed configurations.
 type Config struct {
-	App    AppConfig
-	DB     DBConfig
-	Routes RoutesConfig
+	App      AppConfig
+	DB       DBConfig
+	Postgres PGConfig
+	Routes   RoutesConfig
 }
 
 // Load reads all TOML files from the given directory and returns a Config.
+// Sensitive fields (credentials) are injected from environment variables.
 func Load(dir string) (*Config, error) {
 	cfg := &Config{}
 
@@ -88,11 +108,32 @@ func Load(dir string) (*Config, error) {
 	if err := loadFile(filepath.Join(dir, "database.toml"), &cfg.DB); err != nil {
 		return nil, fmt.Errorf("database.toml: %w", err)
 	}
+	if err := loadFile(filepath.Join(dir, "postgres.toml"), &cfg.Postgres); err != nil {
+		return nil, fmt.Errorf("postgres.toml: %w", err)
+	}
 	if err := loadFile(filepath.Join(dir, "routes.toml"), &cfg.Routes); err != nil {
 		return nil, fmt.Errorf("routes.toml: %w", err)
 	}
 
+	// Inject credentials from environment variables
+	cfg.Postgres.MasterDB.Name     = requireEnv("MASTER_DB_NAME")
+	cfg.Postgres.MasterDB.User     = requireEnv("MASTER_DB_USER")
+	cfg.Postgres.MasterDB.Password = requireEnv("MASTER_DB_PASSWORD")
+
+	cfg.DB.Database.Name     = requireEnv("MSSQL_DB_NAME")
+	cfg.DB.Database.User     = requireEnv("MSSQL_DB_USER")
+	cfg.DB.Database.Password = requireEnv("MSSQL_DB_PASSWORD")
+
 	return cfg, nil
+}
+
+// requireEnv returns the value of an env var or panics with a clear message.
+func requireEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		panic(fmt.Sprintf("required environment variable %q is not set", key))
+	}
+	return v
 }
 
 func loadFile(path string, v any) error {

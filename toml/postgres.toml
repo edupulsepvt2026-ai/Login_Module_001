@@ -1,0 +1,8 @@
+[master_db]
+host                    = "localhost"
+port                    = 5432
+max_conns               = 25
+min_conns               = 5
+max_conn_lifetime_mins  = 30
+max_conn_idle_mins      = 5
+connect_timeout_secs    = 10

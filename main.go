@@ -9,9 +9,14 @@ import (
 	"loginmodule_99/tomlloader"
 	"loginmodule_99/util"
 	"os"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	// ── 0. Load .env file (local dev). In production set env vars directly.
+	_ = godotenv.Load()
+
 	// ── 1. Load configuration from toml/ directory ────────────────────────
 	cfg, err := tomlloader.Load("toml")
 	if err != nil {
@@ -35,8 +40,14 @@ func main() {
 		log.Warn("MSSQL unavailable, continuing without DB: %v", err)
 	} else {
 		defer db.Close()
-		log.Info("database ready")
+		log.Info("MSSQL database ready")
 	}
+
+	// ── 3a. Connect to master PostgreSQL (pgxpool) ────────────────────────
+	if err := db.InitMaster(cfg.Postgres.MasterDB, log); err != nil {
+		log.Fatal("master postgres unavailable: %v", err)
+	}
+	defer db.CloseMaster()
 
 	// ── 4. Build TLS Configuration ────────────────────────────────────────
 	var tlsConfig *tls.Config

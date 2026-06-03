@@ -5,57 +5,50 @@ package router
 import (
 	"database/sql"
 	"encoding/json"
+	"net/http"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	authhandler "loginmodule_99/handlers/auth"
 	"loginmodule_99/tomlloader"
 	"loginmodule_99/util"
-	"net/http"
 )
 
 // New creates a *http.ServeMux with all routes from the config registered.
 // Unknown handler names fall back to a 501 Not Implemented response.
-func New(routes []tomlloader.RouteEntry, log *util.Logger, db *sql.DB) *http.ServeMux {
+func New(routes []tomlloader.RouteEntry, log *util.Logger, db *sql.DB, pg *pgxpool.Pool) *http.ServeMux {
 	mux := http.NewServeMux()
-	routesByPath := make(map[string]map[string]http.HandlerFunc)
 
 	for _, r := range routes {
-		if routesByPath[r.Path] == nil {
-			routesByPath[r.Path] = make(map[string]http.HandlerFunc)
-		}
-		routesByPath[r.Path][r.Method] = resolve(r.Handler, log, db)
+		handler := resolve(r.Handler, log, db, pg)
+		pattern := r.Method + " " + r.Path
+		mux.HandleFunc(pattern, handler)
 		log.Info("route registered: %-6s %s → %s", r.Method, r.Path, r.Handler)
-	}
-
-	for path, methods := range routesByPath {
-		methods := methods
-		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-			if h, ok := methods[r.Method]; ok {
-				h(w, r)
-				return
-			}
-			if len(methods) > 0 {
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			http.NotFound(w, r)
-		})
 	}
 
 	return mux
 }
 
 // registry maps handler names to their constructor functions.
-var registry = map[string]func(*util.Logger, *sql.DB) http.HandlerFunc{
+// mssqlHandlers use the legacy MSSQL pool; pgHandlers use the master Postgres pool.
+var mssqlHandlers = map[string]func(*util.Logger, *sql.DB) http.HandlerFunc{
 	"HealthHandler":     healthHandler,
 	"GetUsersHandler":   getUsersHandler,
 	"CreateUserHandler": createUserHandler,
 	"LoginHandler":      loginHandler,
 }
 
+var pgHandlers = map[string]func(*util.Logger, *pgxpool.Pool) http.HandlerFunc{
+	"InviteVerifyHandler": authhandler.InviteVerify,
+}
+
 // resolve maps a handler name string to an actual http.HandlerFunc.
-func resolve(name string, log *util.Logger, db *sql.DB) http.HandlerFunc {
-	if fn, ok := registry[name]; ok {
+func resolve(name string, log *util.Logger, db *sql.DB, pg *pgxpool.Pool) http.HandlerFunc {
+	if fn, ok := pgHandlers[name]; ok {
+		return fn(log, pg)
+	}
+	if fn, ok := mssqlHandlers[name]; ok {
 		return fn(log, db)
 	}
-
 	log.Warn("no handler found for %q, using 501 stub", name)
 	return func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not implemented: "+name, http.StatusNotImplemented)

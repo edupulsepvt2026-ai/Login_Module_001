@@ -49,6 +49,10 @@ func main() {
 	}
 	defer db.CloseMaster()
 
+	// ── 3b. Init tenant pool manager ──────────────────────────────────────
+	db.InitTenantManager(db.GetMaster(), log)
+	defer db.Manager.CloseAll()
+
 	// ── 4. Build TLS Configuration ────────────────────────────────────────
 	var tlsConfig *tls.Config
 	if cfg.App.Server.TLS.Enabled {
@@ -81,7 +85,7 @@ func main() {
 	}
 
 	// ── 5. Build router from routes.toml ──────────────────────────────────
-	mux := router.New(cfg.Routes.Routes, log, db.Get())
+	mux := router.New(cfg.Routes.Routes, log, db.Get(), db.GetMaster())
 
 	// ── 6. Assemble and start API gateway ─────────────────────────────────
 	addr := fmt.Sprintf("%s:%d", cfg.App.Server.Host, cfg.App.Server.Port)

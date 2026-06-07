@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,4 +97,13 @@ func Must(err error, msg string) {
 	if err != nil {
 		panic(fmt.Sprintf("%s: %v", msg, err))
 	}
+}
+
+const PathParamsKey = "pathParams"
+
+func PathParam(r *http.Request, key string) string {
+	if params, ok := r.Context().Value(PathParamsKey).(map[string]string); ok {
+		return params[key]
+	}
+	return ""
 }

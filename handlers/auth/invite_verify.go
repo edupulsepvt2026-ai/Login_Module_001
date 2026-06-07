@@ -9,17 +9,27 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"loginmodule_99/response"
 	"loginmodule_99/util"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ── Response types ────────────────────────────────────────────────────────────
 
 type branchInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	City string `json:"city"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	City      string `json:"city"`
+	State     string `json:"state"`
+	BoardType string `json:"board_type"`
+}
+
+type chainInfo struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	PanNumber string `json:"pan_number"`
+	GSTNumber string `json:"gst_number"`
 }
 
 type inviteVerifyData struct {
@@ -27,7 +37,7 @@ type inviteVerifyData struct {
 	Name      string       `json:"name"`
 	Email     string       `json:"email"`
 	Phone     string       `json:"phone"`
-	ChainName string       `json:"chain_name"`
+	Chain     chainInfo    `json:"chain"`
 	Branches  []branchInfo `json:"branches"`
 	ExpiresAt time.Time    `json:"expires_at"`
 }
@@ -38,21 +48,20 @@ type inviteVerifyData struct {
 // Validates the magic link token and returns invite + chain + branch info.
 func InviteVerify(log *util.Logger, pg *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		rawToken := r.PathValue("token")
+		rawToken := util.PathParam(r, "token")
 		if rawToken == "" {
 			response.Err(w, http.StatusBadRequest, "INVALID_TOKEN", "Token is required.")
 			return
 		}
 
 		tokenHash := hashToken(rawToken)
-		log.Info("invite verify request", "token_hash_prefix", tokenHash[:8])
-
+		log.Info("invite verify request token_hash_prefix=%s", tokenHash[:8])
 		ctx := r.Context()
 
 		// ── Step 1: fetch invite + status + management user + chain ──────────
 		invite, err := fetchInvite(ctx, pg, tokenHash)
 		if err == errNotFound {
-			log.Warn("invite not found", "token_hash_prefix", tokenHash[:8])
+			log.Warn("invite not found token_hash_prefix=%s", tokenHash[:8])
 			response.Err(w, http.StatusBadRequest, "INVALID_TOKEN", "The invite link is invalid or has already been used.")
 			return
 		}
@@ -77,8 +86,7 @@ func InviteVerify(log *util.Logger, pg *pgxpool.Pool) http.HandlerFunc {
 
 		// ── Step 3: check expiry ─────────────────────────────────────────────
 		if time.Now().After(invite.expiresAt) {
-			log.Warn("invite token expired", "invite_id", invite.id, "expired_at", invite.expiresAt)
-			response.Err(w, http.StatusBadRequest, "TOKEN_EXPIRED", "This invite link has expired.")
+			log.Warn("invite token expired invite_id=%s expired_at=%s", invite.id, invite.expiresAt)
 			return
 		}
 
@@ -90,14 +98,19 @@ func InviteVerify(log *util.Logger, pg *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		log.Info("invite verified successfully", "invite_id", invite.id, "chain", invite.chainName)
+		log.Info("invite verified successfully invite_id=%s chain=%s", invite.id, invite.chainName)
 
 		response.OK(w, inviteVerifyData{
-			InviteID:  invite.id,
-			Name:      invite.userName,
-			Email:     invite.userEmail,
-			Phone:     invite.userPhone,
-			ChainName: invite.chainName,
+			InviteID: invite.id,
+			Name:     invite.userName,
+			Email:    invite.userEmail,
+			Phone:    invite.userPhone,
+			Chain: chainInfo{
+				ID:        invite.chainID,
+				Name:      invite.chainName,
+				PanNumber: invite.chainPanNumber,
+				GSTNumber: invite.chainGSTNumber,
+			},
 			Branches:  branches,
 			ExpiresAt: invite.expiresAt,
 		})
@@ -109,14 +122,16 @@ func InviteVerify(log *util.Logger, pg *pgxpool.Pool) http.HandlerFunc {
 var errNotFound = fmt.Errorf("not found")
 
 type inviteRecord struct {
-	id        string
-	status    string
-	expiresAt time.Time
-	userName  string
-	userEmail string
-	userPhone string
-	chainID   string
-	chainName string
+	id             string
+	status         string
+	expiresAt      time.Time
+	userName       string
+	userEmail      string
+	userPhone      string
+	chainID        string
+	chainName      string
+	chainPanNumber string
+	chainGSTNumber string
 }
 
 func fetchInvite(ctx context.Context, pg *pgxpool.Pool, tokenHash string) (*inviteRecord, error) {
@@ -129,7 +144,9 @@ func fetchInvite(ctx context.Context, pg *pgxpool.Pool, tokenHash string) (*invi
 			COALESCE(mu.email, '') AS user_email,
 			COALESCE(mu.phone, '') AS user_phone,
 			c.id             AS chain_id,
-			c.name           AS chain_name
+			c.name           AS chain_name,
+		COALESCE(c.pan_number, '') AS chain_pan_number,
+		COALESCE(c.gst_number, '') AS chain_gst_number
 		FROM auth.invite i
 		JOIN auth.invite_status   s  ON s.id  = i.status_id
 		JOIN auth.management_user mu ON mu.id = i.management_user_id
@@ -149,6 +166,8 @@ func fetchInvite(ctx context.Context, pg *pgxpool.Pool, tokenHash string) (*invi
 		&rec.userPhone,
 		&rec.chainID,
 		&rec.chainName,
+		&rec.chainPanNumber,
+		&rec.chainGSTNumber,
 	)
 	if err != nil {
 		if isNoRows(err) {
@@ -162,7 +181,7 @@ func fetchInvite(ctx context.Context, pg *pgxpool.Pool, tokenHash string) (*invi
 
 func fetchBranches(ctx context.Context, pg *pgxpool.Pool, chainID string) ([]branchInfo, error) {
 	query := `
-		SELECT id, name, city
+		SELECT id, name, city, state, board_type
 		FROM onboarding.branch
 		WHERE chain_id = $1
 		  AND is_active = true
@@ -178,7 +197,7 @@ func fetchBranches(ctx context.Context, pg *pgxpool.Pool, chainID string) ([]bra
 	var branches []branchInfo
 	for rows.Next() {
 		var b branchInfo
-		if err := rows.Scan(&b.ID, &b.Name, &b.City); err != nil {
+		if err := rows.Scan(&b.ID, &b.Name, &b.City, &b.State, &b.BoardType); err != nil {
 			return nil, fmt.Errorf("fetchBranches scan: %w", err)
 		}
 		branches = append(branches, b)

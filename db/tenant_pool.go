@@ -6,8 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"loginmodule_99/util"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // TenantPoolManager manages one pgxpool per tenant (school) database.
@@ -57,7 +58,7 @@ func (tm *TenantPoolManager) GetTenantPool(ctx context.Context, chainID string) 
 	tm.mu.RUnlock()
 
 	// ── slow path: create pool for the first time ────────────────────────
-	tm.log.Info("creating new tenant pool", "chain_id", chainID)
+	tm.log.Info("creating new tenant pool chain_id=%s", chainID)
 
 	creds, err := tm.fetchCredentials(ctx, chainID)
 	if err != nil {
@@ -79,7 +80,7 @@ func (tm *TenantPoolManager) GetTenantPool(ctx context.Context, chainID string) 
 	}
 	tm.pools[chainID] = pool
 
-	tm.log.Info("tenant pool cached", "chain_id", chainID)
+	tm.log.Info("tenant pool cached chain_id=%s", chainID)
 	return pool, nil
 }
 
@@ -91,7 +92,7 @@ func (tm *TenantPoolManager) EvictPool(chainID string) {
 	if pool, ok := tm.pools[chainID]; ok {
 		pool.Close()
 		delete(tm.pools, chainID)
-		tm.log.Info("tenant pool evicted", "chain_id", chainID)
+		tm.log.Info("tenant pool evicted chain_id=%s", chainID)
 	}
 }
 
@@ -101,7 +102,7 @@ func (tm *TenantPoolManager) CloseAll() {
 	defer tm.mu.Unlock()
 	for chainID, pool := range tm.pools {
 		pool.Close()
-		tm.log.Info("tenant pool closed", "chain_id", chainID)
+		tm.log.Info("tenant pool closed chain_id=%s", chainID)
 	}
 	tm.pools = make(map[string]*pgxpool.Pool)
 }

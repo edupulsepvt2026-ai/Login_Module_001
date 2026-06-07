@@ -116,24 +116,43 @@ func Load(dir string) (*Config, error) {
 	}
 
 	// Inject credentials from environment variables
-	cfg.Postgres.MasterDB.Name     = requireEnv("MASTER_DB_NAME")
-	cfg.Postgres.MasterDB.User     = requireEnv("MASTER_DB_USER")
-	cfg.Postgres.MasterDB.Password = requireEnv("MASTER_DB_PASSWORD")
+	var err error
+	cfg.Postgres.MasterDB.Name, err = requireEnv("MASTER_DB_NAME")
+	if err != nil {
+		return nil, err
+	}
+	cfg.Postgres.MasterDB.User, err = requireEnv("MASTER_DB_USER")
+	if err != nil {
+		return nil, err
+	}
+	cfg.Postgres.MasterDB.Password, err = requireEnv("MASTER_DB_PASSWORD")
+	if err != nil {
+		return nil, err
+	}
 
-	cfg.DB.Database.Name     = requireEnv("MSSQL_DB_NAME")
-	cfg.DB.Database.User     = requireEnv("MSSQL_DB_USER")
-	cfg.DB.Database.Password = requireEnv("MSSQL_DB_PASSWORD")
+	cfg.DB.Database.Name, err = requireEnv("MSSQL_DB_NAME")
+	if err != nil {
+		return nil, err
+	}
+	cfg.DB.Database.User, err = requireEnv("MSSQL_DB_USER")
+	if err != nil {
+		return nil, err
+	}
+	cfg.DB.Database.Password, err = requireEnv("MSSQL_DB_PASSWORD")
+	if err != nil {
+		return nil, err
+	}
 
 	return cfg, nil
 }
 
-// requireEnv returns the value of an env var or panics with a clear message.
-func requireEnv(key string) string {
+// requireEnv returns the value of an env var or an error if it is unset.
+func requireEnv(key string) (string, error) {
 	v := os.Getenv(key)
 	if v == "" {
-		panic(fmt.Sprintf("required environment variable %q is not set", key))
+		return "", fmt.Errorf("required environment variable %q is not set", key)
 	}
-	return v
+	return v, nil
 }
 
 func loadFile(path string, v any) error {

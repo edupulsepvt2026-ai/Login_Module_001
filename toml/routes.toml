@@ -23,3 +23,33 @@ handler = "CreateUserHandler"
 path    = "/api/v1/login"
 method  = "POST"
 handler = "LoginHandler"
+
+[[routes]]
+path = "/api/v1/auth/otp/send"
+method = "POST"
+handler = "SendOTPHandler"
+
+[[routes]]
+path = "/api/v1/auth/email-verification/send"
+method = "POST"
+handler = "SendEmailVerificationHandler"
+
+[[routes]]
+path = "/api/v1/auth/otp/verify"
+method = "POST"
+handler = "VerifyOTPHandler"
+
+[[routes]]
+path = "/api/v1/auth/email-verification/verify"
+method = "POST"
+handler = "VerifyEmailHandler"
+
+[[routes]]
+path = "/api/v1/auth/chain-admin/register"
+method = "POST"
+handler = "RegisterChainAdminHandler"
+
+[[routes]]
+path = "/api/v1/auth/chain-admin/login"
+method = "POST"
+handler = "LoginChainAdminHandler"

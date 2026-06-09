@@ -1,6 +1,6 @@
 [database]
 server   = "localhost"
-port     = 1433
+port     = 5432
 timeout  = 30
 encrypt  = false
 max_open_conns = 25

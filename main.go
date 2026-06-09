@@ -14,8 +14,9 @@ import (
 )
 
 func main() {
-	// ── 0. Load .env file (local dev). In production set env vars directly.
-	_ = godotenv.Load()
+	// ── 0. Load local env files (local dev). In production set env vars directly.
+	_ = godotenv.Load(".env")
+	_ = godotenv.Load("env")
 
 	// ── 1. Load configuration from toml/ directory ────────────────────────
 	cfg, err := tomlloader.Load("toml")

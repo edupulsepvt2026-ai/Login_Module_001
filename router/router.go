@@ -1,31 +1,122 @@
 // Package router wires HTTP routes declared in routes.toml to their
-// handler functions using only the standard library's net/http ServeMux.
+// handler functions using a lightweight custom router that supports
+// HTTP method + path patterns and path parameters.
 package router
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	authhandler "loginmodule_99/handlers/auth"
 	"loginmodule_99/tomlloader"
 	"loginmodule_99/util"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// New creates a *http.ServeMux with all routes from the config registered.
-// Unknown handler names fall back to a 501 Not Implemented response.
-func New(routes []tomlloader.RouteEntry, log *util.Logger, db *sql.DB, pg *pgxpool.Pool) *http.ServeMux {
-	mux := http.NewServeMux()
+type contextKey string
+
+const pathParamsContextKey contextKey = "pathParams"
+
+type routeEntry struct {
+	method   string
+	segments []string
+	handler  http.HandlerFunc
+}
+
+type Router struct {
+	routes []routeEntry
+	log    *util.Logger
+}
+
+// New creates a custom router from routes.toml.
+func New(routes []tomlloader.RouteEntry, log *util.Logger, db *sql.DB, pg *pgxpool.Pool) http.Handler {
+	router := &Router{log: log}
 
 	for _, r := range routes {
 		handler := resolve(r.Handler, log, db, pg)
-		pattern := r.Method + " " + r.Path
-		mux.HandleFunc(pattern, handler)
+		router.routes = append(router.routes, routeEntry{
+			method:   strings.ToUpper(strings.TrimSpace(r.Method)),
+			segments: splitSegments(r.Path),
+			handler:  handler,
+		})
 		log.Info("route registered: %-6s %s → %s", r.Method, r.Path, r.Handler)
 	}
 
-	return mux
+	return router
+}
+
+func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	pathSegments := splitSegments(req.URL.Path)
+	method := req.Method
+	var pathMatched bool
+
+	for _, route := range r.routes {
+		params, ok := matchRoute(route.segments, pathSegments)
+		if !ok {
+			continue
+		}
+
+		pathMatched = true
+		if route.method != method {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if len(params) > 0 {
+			req = WithPathParams(req, params)
+		}
+
+		route.handler(w, req)
+		return
+	}
+
+	if pathMatched {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	http.NotFound(w, req)
+}
+
+func splitSegments(path string) []string {
+	trimmed := strings.Trim(path, "/")
+	if trimmed == "" {
+		return []string{}
+	}
+	return strings.Split(trimmed, "/")
+}
+
+func matchRoute(pattern, actual []string) (map[string]string, bool) {
+	if len(pattern) != len(actual) {
+		return nil, false
+	}
+
+	params := map[string]string{}
+	for i, segment := range pattern {
+		if strings.HasPrefix(segment, "{") && strings.HasSuffix(segment, "}") {
+			key := segment[1 : len(segment)-1]
+			params[key] = actual[i]
+			continue
+		}
+
+		if segment != actual[i] {
+			return nil, false
+		}
+	}
+
+	return params, true
+}
+
+func WithPathParams(r *http.Request, params map[string]string) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), util.PathParamsKey, params))
+}
+
+func PathValue(r *http.Request, key string) string {
+	return util.PathParam(r, key)
 }
 
 // registry maps handler names to their constructor functions.
@@ -38,7 +129,13 @@ var mssqlHandlers = map[string]func(*util.Logger, *sql.DB) http.HandlerFunc{
 }
 
 var pgHandlers = map[string]func(*util.Logger, *pgxpool.Pool) http.HandlerFunc{
-	"InviteVerifyHandler": authhandler.InviteVerify,
+	"InviteVerifyHandler":          authhandler.InviteVerify,
+	"SendOTPHandler":               authhandler.SendOTP,
+	"SendEmailVerificationHandler": authhandler.SendEmailVerification,
+	"VerifyOTPHandler":             authhandler.VerifyOTPWithSession,
+	"VerifyEmailHandler":           authhandler.VerifyEmailWithSession,
+	"RegisterChainAdminHandler":    authhandler.RegisterChainAdmin,
+	"LoginChainAdminHandler":       authhandler.LoginChainAdmin,
 }
 
 // resolve maps a handler name string to an actual http.HandlerFunc.

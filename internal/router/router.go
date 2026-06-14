@@ -1,6 +1,7 @@
 package router
 
 import (
+	"auth-service/db"
 	"auth-service/internal/handler"
 	"auth-service/internal/middleware"
 	pkgjwt "auth-service/pkg/jwt"
@@ -16,7 +17,7 @@ type Handlers struct {
 	Logout  *handler.LogoutHandler
 }
 
-func Setup(h *Handlers, jwtManager *pkgjwt.Manager) *gin.Engine {
+func Setup(h *Handlers, jwtManager *pkgjwt.Manager, tenantMgr *db.TenantPoolManager) *gin.Engine {
 	r := gin.Default()
 
 	// public routes — no JWT required
@@ -35,6 +36,19 @@ func Setup(h *Handlers, jwtManager *pkgjwt.Manager) *gin.Engine {
 	{
 		protected.POST("/logout", h.Logout.Logout)
 	}
+
+	// tenant routes — requires tenant mid header and JWT
+	// Add your tenant-specific routes here:
+	// Example routes (uncomment and add handlers as needed):
+	// tenant := r.Group("/tenant", middleware.TenantDBMiddleware(tenantMgr), middleware.JWTMiddleware(jwtManager))
+	// {
+	//    tenant.POST("/data/insert", h.Data.Insert)
+	//    tenant.POST("/data/update", h.Data.Update)
+	//    tenant.GET("/data/:id", h.Data.Get)
+	// }
+
+	// For now, register the tenant middleware group (even if empty)
+	_ = r.Group("/tenant", middleware.TenantDBMiddleware(tenantMgr), middleware.JWTMiddleware(jwtManager))
 
 	return r
 }

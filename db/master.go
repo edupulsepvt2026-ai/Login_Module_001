@@ -22,9 +22,9 @@ func ConnectMaster(dsn string) *pgxpool.Pool {
 	return pool
 }
 
-func BuildDSN(host, port, user, password, dbname string) string {
+func BuildDSN(host, port, user, password, dbname, sslMode string) string {
 	return fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		user, password, host, port, dbname,
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		user, password, host, port, dbname, sslMode,
 	)
 }

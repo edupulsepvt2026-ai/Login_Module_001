@@ -23,6 +23,9 @@ type Config struct {
 	JWTSecret               string
 	JWTAccessExpirySeconds  int
 	JWTRefreshExpirySeconds int
+
+	// Tenant pool expiry duration in minutes (default 30 min)
+	TenantPoolExpiryMinutes int
 }
 
 func Load() *Config {
@@ -45,6 +48,7 @@ func Load() *Config {
 		JWTSecret:               getEnv("JWT_SECRET", ""),
 		JWTAccessExpirySeconds:  getEnvInt("JWT_ACCESS_EXPIRY_SECONDS", 900),
 		JWTRefreshExpirySeconds: getEnvInt("JWT_REFRESH_EXPIRY_SECONDS", 604800),
+		TenantPoolExpiryMinutes: getEnvInt("TENANT_POOL_EXPIRY_MINUTES", 30),
 	}
 }
 

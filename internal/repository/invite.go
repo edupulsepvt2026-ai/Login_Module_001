@@ -69,3 +69,39 @@ func (r *InviteRepository) RevokeAllPending(ctx context.Context, managementUserI
 	}
 	return nil
 }
+
+func (r *InviteRepository) GetChainByID(ctx context.Context, chainID string) (*model.Chain, error) {
+	chain := &model.Chain{}
+	err := r.db.QueryRow(ctx, `
+		SELECT id, name
+		FROM onboarding.chain
+		WHERE id = $1
+	`, chainID).Scan(&chain.ID, &chain.Name)
+	if err != nil {
+		return nil, fmt.Errorf("chain not found: %w", err)
+	}
+	return chain, nil
+}
+
+func (r *InviteRepository) GetBranchesByChainID(ctx context.Context, chainID string) ([]model.Branch, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, name, city, state, board_type
+		FROM onboarding.branch
+		WHERE chain_id = $1
+		ORDER BY name
+	`, chainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch branches: %w", err)
+	}
+	defer rows.Close()
+
+	var branches []model.Branch
+	for rows.Next() {
+		var b model.Branch
+		if err := rows.Scan(&b.ID, &b.Name, &b.City, &b.State, &b.BoardType); err != nil {
+			return nil, fmt.Errorf("failed to scan branch: %w", err)
+		}
+		branches = append(branches, b)
+	}
+	return branches, nil
+}

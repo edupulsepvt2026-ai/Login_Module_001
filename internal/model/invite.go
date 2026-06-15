@@ -16,3 +16,16 @@ type Invite struct {
 	AcceptedAt       *time.Time
 	CreatedAt        time.Time
 }
+
+type Chain struct {
+	ID   uuid.UUID
+	Name string
+}
+
+type Branch struct {
+	ID        uuid.UUID
+	Name      string
+	City      string
+	State     string
+	BoardType string
+}

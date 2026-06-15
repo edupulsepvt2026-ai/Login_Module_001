@@ -22,9 +22,22 @@ func NewInviteService(inviteRepo *repository.InviteRepository, userRepo *reposit
 	return &InviteService{inviteRepo: inviteRepo, userRepo: userRepo, redis: redis}
 }
 
+type BranchResult struct {
+	ID        string
+	Name      string
+	City      string
+	State     string
+	BoardType string
+}
+
 type VerifyTokenResult struct {
 	TempToken string
+	UserName  string
+	Email     string
 	Phone     string
+	ChainID   string
+	ChainName string
+	Branches  []BranchResult
 }
 
 func (s *InviteService) VerifyToken(ctx context.Context, rawToken string) (*VerifyTokenResult, error) {
@@ -44,6 +57,16 @@ func (s *InviteService) VerifyToken(ctx context.Context, rawToken string) (*Veri
 		return nil, fmt.Errorf("user not found")
 	}
 
+	chain, err := s.inviteRepo.GetChainByID(ctx, user.ChainID.String())
+	if err != nil {
+		return nil, fmt.Errorf("chain not found")
+	}
+
+	branches, err := s.inviteRepo.GetBranchesByChainID(ctx, user.ChainID.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch branches")
+	}
+
 	if err := s.inviteRepo.MarkAccepted(ctx, invite.ID.String()); err != nil {
 		return nil, fmt.Errorf("failed to process invite")
 	}
@@ -56,9 +79,25 @@ func (s *InviteService) VerifyToken(ctx context.Context, rawToken string) (*Veri
 		return nil, fmt.Errorf("failed to create verification session")
 	}
 
+	branchResults := make([]BranchResult, len(branches))
+	for i, b := range branches {
+		branchResults[i] = BranchResult{
+			ID:        b.ID.String(),
+			Name:      b.Name,
+			City:      b.City,
+			State:     b.State,
+			BoardType: b.BoardType,
+		}
+	}
+
 	return &VerifyTokenResult{
 		TempToken: tempToken,
+		UserName:  user.Name,
+		Email:     maskEmail(ptrStr(user.Email)),
 		Phone:     maskPhone(ptrStr(user.Phone)),
+		ChainID:   chain.ID.String(),
+		ChainName: chain.Name,
+		Branches:  branchResults,
 	}, nil
 }
 
@@ -74,4 +113,18 @@ func maskPhone(phone string) string {
 		return "****"
 	}
 	return "******" + phone[len(phone)-4:]
+}
+
+func maskEmail(email string) string {
+	at := -1
+	for i, c := range email {
+		if c == '@' {
+			at = i
+			break
+		}
+	}
+	if at <= 1 {
+		return "****" + email[at:]
+	}
+	return string(email[0]) + "****" + email[at:]
 }

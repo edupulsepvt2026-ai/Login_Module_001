@@ -1,15 +1,23 @@
 -- ================================================================
 -- EDUPULSE MASTER DB — DEV SEED: infrastructure schema
--- Story : Velammal tenant DB connection credentials (local dev)
+--
+-- Entry 1 : Velammal chain  (bbbbbbbb-0001-...)
+-- Entry 2 : Second chain    (bbbbbbbb-0002-...)
 --
 -- Run AFTER: 01_auth → 02_onboarding → dev_seed_velammal.sql
--- (chain bbbbbbbb-0001-4000-8000-000000000001 must exist first)
+-- (chains must exist in onboarding.chain before this runs)
 --
 -- Encryption : AES-256-GCM
 -- Key        : SHA-256("dummy-encryption-key")  ← dev only, never production
--- Plaintext  : "postgres"
 -- Decrypt    : see util/crypto.go DecryptPassword()
 -- ================================================================
+
+-- ── Entry 1: Velammal chain ──────────────────────────────────
+-- Plaintext password : Edupulse@2026
+-- Nonce              : 000000000000000000000001
+
+DELETE FROM infrastructure.chain_database
+WHERE id = 'dddddddd-0001-4000-8000-000000000001';
 
 INSERT INTO infrastructure.chain_database (
     id,
@@ -26,13 +34,13 @@ INSERT INTO infrastructure.chain_database (
     is_active
 ) VALUES (
     'dddddddd-0001-4000-8000-000000000001',
-    'bbbbbbbb-0001-4000-8000-000000000001',  -- Velammal chain
-    'localhost',
+    'bbbbbbbb-0001-4000-8000-000000000001',  -- Second chain
+    'db.hqtrzgykhejxqgsxqfkp.supabase.co',
     5432,
-    'crew_campus_vellamal_tenant',
     'postgres',
-    'RPXunmaAukIyoXpquSLkBQ/E9DQl5geEBb4N/RWWq/MQzUc/',  -- AES-GCM("postgres", "dummy-encryption-key")
-    'disable',   -- local dev: no TLS
+    'postgres',
+    'AAAAAAAAAAAAAAAC0E+kuTUBrioQ39JaX1SyfYQZOqZg7l6AKWoNsA==',  -- AES-GCM("Edupulse@123", "dummy-encryption-key")
+    'require',
     20,
     10,
     5,

@@ -1,0 +1,8 @@
+docs/
+db_migrations/
+.vscode/
+.claude/
+master_db_schema/
+.json
+.env
+

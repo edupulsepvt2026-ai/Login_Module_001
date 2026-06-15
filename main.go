@@ -21,7 +21,7 @@ func main() {
 	cfg := config.Load()
 
 	// Master DB - constant connection for credentials and core data
-	dsn := db.BuildDSN(cfg.MasterDBHost, cfg.MasterDBPort, cfg.MasterDBUser, cfg.MasterDBPassword, cfg.MasterDBName, "disable")
+	dsn := db.BuildDSN(cfg.MasterDBHost, cfg.MasterDBPort, cfg.MasterDBUser, cfg.MasterDBPassword, cfg.MasterDBName, "require")
 	masterDB := db.ConnectMaster(dsn)
 	defer masterDB.Close()
 

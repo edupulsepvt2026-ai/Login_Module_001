@@ -38,9 +38,29 @@ func (h *InviteHandler) VerifyToken(c *gin.Context) {
 		return
 	}
 
+	branches := make([]gin.H, len(result.Branches))
+	for i, b := range result.Branches {
+		branches[i] = gin.H{
+			"id":         b.ID,
+			"name":       b.Name,
+			"city":       b.City,
+			"state":      b.State,
+			"board_type": b.BoardType,
+		}
+	}
+
 	response.OK(c, gin.H{
 		"temp_token": result.TempToken,
-		"phone":      result.Phone,
+		"user": gin.H{
+			"name":  result.UserName,
+			"email": result.Email,
+			"phone": result.Phone,
+		},
+		"chain": gin.H{
+			"id":   result.ChainID,
+			"name": result.ChainName,
+		},
+		"branches": branches,
 	})
 }
 

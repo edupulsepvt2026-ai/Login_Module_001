@@ -204,8 +204,9 @@ INSERT
 
 REDIS SET
   key   : invite_verify:{temp_token}
-  value : {user_id}:{phone}
+  value : {user_id}:{phone}:{email}
   TTL   : 10 minutes
+  → both phone and email stored so Step 2 can deliver to either channel
 ```
 
 > **Rule:** Do NOT update `auth.invite` status here yet.
@@ -215,7 +216,8 @@ REDIS SET
 
 ### STEP 2 — Send OTP
 
-Sends a 6-digit OTP to the phone number registered during onboarding.
+Sends a 6-digit OTP to the chain admin's phone or email depending on the `channel` field.
+Both channels use the same endpoint — the service routes to the correct delivery address and OTP type.
 
 ```
 POST /api/v1/auth/otp/send
@@ -225,25 +227,25 @@ POST /api/v1/auth/otp/send
 
 **Request Body**
 
-| Field        | Type   | Required | Description                            |
-|--------------|--------|----------|----------------------------------------|
-| `temp_token` | string | Yes      | Received from Step 1 invite/verify     |
+| Field        | Type   | Required | Description                                        |
+|--------------|--------|----------|----------------------------------------------------|
+| `temp_token` | string | Yes      | Received from Step 1 invite/verify                 |
+| `channel`    | string | Yes      | Delivery channel — `"sms"` or `"email"`            |
 
 ```json
-{
-  "temp_token": "550e8400-e29b-41d4-a716-446655440000"
-}
+{ "temp_token": "550e8400-e29b-41d4-a716-446655440000", "channel": "sms" }
+```
+```json
+{ "temp_token": "550e8400-e29b-41d4-a716-446655440000", "channel": "email" }
 ```
 
 **Success Response — 200**
 
 ```json
-{
-  "success": true,
-  "data": {
-    "message": "OTP sent to registered mobile number"
-  }
-}
+{ "success": true, "data": { "message": "OTP sent to registered mobile number" } }
+```
+```json
+{ "success": true, "data": { "message": "OTP sent to registered email address" } }
 ```
 
 **Error Responses**
@@ -252,7 +254,10 @@ POST /api/v1/auth/otp/send
 |------|-------------------------------------------|--------------------------------------|
 | 400  | `invalid or expired verification session` | temp_token not found or expired      |
 | 400  | `temp_token is required`                  | Request body missing field           |
-| 500  | `failed to send OTP`                      | SMS provider failure                 |
+| 400  | `channel must be sms or email`            | Invalid channel value                |
+| 400  | `phone not registered for this account`   | channel=sms but phone is null        |
+| 400  | `email not registered for this account`   | channel=email but email is null      |
+| 500  | `failed to send OTP`                      | Omnichannel service failure          |
 
 > **Note:** OTP is valid for **5 minutes**. Maximum **3 attempts** allowed.
 > After 3 wrong attempts, the chain admin must request a new OTP.
@@ -263,23 +268,35 @@ POST /api/v1/auth/otp/send
 REDIS GET
   key : invite_verify:{temp_token}
   → validate session exists
-  → extract phone number from value
+  → extract fields: user_id, phone, email
+    (value format: {user_id}:{phone}:{email})
+
+  if channel = "sms"  → delivery_address = phone
+  if channel = "email" → delivery_address = email
 
 READ
   auth.otp_type
-    WHERE name = 'signup_sms'
+    WHERE name = 'signup_sms'    (channel = "sms")
+       OR name = 'signup_email'  (channel = "email")
   → get otp_type_id, TTL (300 seconds), max_attempts (3)
 
 INSERT
   auth.otp
     otp_type_id      = otp_type.id
     code_hash        = SHA256(generated_6_digit_code)
-    delivery_address = phone
+    delivery_address = phone  OR  email  (based on channel)
     attempts         = 0
     is_used          = false
     expires_at       = now() + 5 minutes
 
-  → raw OTP code is sent via SMS, never stored
+  → channel = "sms"   : raw OTP sent via omnichannel service (kind: "sms")
+  → channel = "email" : raw OTP sent via omnichannel service (kind: "email")
+  → raw OTP is never stored
+
+REDIS SET  (update session — record which channel was used)
+  key   : invite_verify:{temp_token}
+  value : {user_id}:{phone}:{email}:{channel}
+  TTL   : 10 minutes  (reset TTL)
 ```
 
 ---
@@ -336,16 +353,20 @@ POST /api/v1/auth/otp/verify
 REDIS GET
   key : invite_verify:{temp_token}
   → validate session exists
-  → extract phone number
+  → extract fields: user_id, phone, email, channel
+    (value format after Step 2: {user_id}:{phone}:{email}:{channel})
+
+  delivery_address = phone   (if channel = "sms")
+  delivery_address = email   (if channel = "email")
 
 READ
   auth.otp
-    WHERE delivery_address = phone
+    WHERE delivery_address = delivery_address  -- phone or email
       AND is_used          = false
       AND expires_at       > now()
     ORDER BY created_at DESC
     LIMIT 1
-  → get latest active OTP
+  → get latest active OTP for that delivery address
 
   if otp.attempts >= 3
     → return error: too many incorrect attempts
@@ -363,11 +384,11 @@ INSERT
   auth.audit_log
     event_type = 'otp_verified'
     user_id    = management_user.id
-    metadata   = { "delivery_address": "masked_phone" }
+    metadata   = { "channel": "sms|email", "delivery_address": "masked" }
 
 REDIS SET  (update session — mark OTP as verified)
   key   : invite_verify:{temp_token}
-  value : {user_id}:{phone}:otp_verified
+  value : {user_id}:{phone}:{email}:{channel}:otp_verified
   TTL   : 10 minutes  (reset TTL)
 ```
 
@@ -537,10 +558,16 @@ refresh_token →  Opaque, 7 day TTL, hash stored in auth.session, rotated on ea
 
 ## Redis Key Structure
 
-| Key pattern                    | Value                              | TTL        | Set in  | Deleted in |
-|--------------------------------|------------------------------------|------------|---------|------------|
-| `invite_verify:{temp_token}`   | `{user_id}:{phone}`                | 10 minutes | Step 1  | —          |
-| `invite_verify:{temp_token}`   | `{user_id}:{phone}:otp_verified`   | 10 minutes | Step 3  | Step 4     |
+The same key is overwritten at each step to advance its state:
+
+| Step    | Value written to `invite_verify:{temp_token}`          | TTL        |
+|---------|--------------------------------------------------------|------------|
+| Step 1  | `{user_id}:{phone}:{email}`                            | 10 minutes |
+| Step 2  | `{user_id}:{phone}:{email}:{channel}`                  | 10 minutes (TTL reset) |
+| Step 3  | `{user_id}:{phone}:{email}:{channel}:otp_verified`     | 10 minutes (TTL reset) |
+| Step 4  | *(key deleted after success)*                          | —          |
+
+`{channel}` is either `sms` or `email` — set by the client in Step 2 and carried forward so Step 3 and Step 4 know which delivery address was verified.
 
 ---
 

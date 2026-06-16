@@ -17,6 +17,8 @@ type Config struct {
 	MasterDBUser     string
 	MasterDBPassword string
 
+	OmnichannelURL string
+
 	RedisAddr     string
 	RedisPassword string
 
@@ -41,6 +43,8 @@ func Load() *Config {
 		MasterDBName:     getEnv("MASTER_DB_NAME", ""),
 		MasterDBUser:     getEnv("MASTER_DB_USER", "postgres"),
 		MasterDBPassword: getEnv("MASTER_DB_PASSWORD", ""),
+
+		OmnichannelURL: getEnv("OMNICHANNEL_URL", "http://localhost:8001"),
 
 		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),

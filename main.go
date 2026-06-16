@@ -12,6 +12,7 @@ import (
 	"auth-service/internal/repository"
 	"auth-service/internal/service"
 	pkgjwt "auth-service/pkg/jwt"
+	"auth-service/pkg/notify"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -48,10 +49,13 @@ func main() {
 	sessionRepo := repository.NewSessionRepository(masterDB)
 	userRepo := repository.NewUserRepository(masterDB)
 
+	// Notify
+	notifier := notify.NewClient(cfg.OmnichannelURL)
+
 	// Services
 	sessionSvc := service.NewSessionService(sessionRepo, userRepo, jwtManager)
 	inviteSvc := service.NewInviteService(inviteRepo, userRepo, rdb)
-	otpSvc := service.NewOTPService(otpRepo, rdb)
+	otpSvc := service.NewOTPService(otpRepo, rdb, notifier)
 	tokenSvc := service.NewTokenService(userRepo, sessionSvc, rdb)
 
 	// Handlers

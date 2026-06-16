@@ -28,11 +28,11 @@ func (s *TokenService) SetPasswordAndActivate(ctx context.Context, tempToken, pa
 		return nil, fmt.Errorf("invalid or expired verification session")
 	}
 
-	parts := strings.SplitN(val, ":", 3)
-	if len(parts) < 3 || parts[2] != "otp_verified" {
+	// Value format: {user_id}:{phone}:{email}:{channel}:otp_verified
+	if !strings.HasSuffix(val, ":otp_verified") {
 		return nil, fmt.Errorf("OTP verification required before setting password")
 	}
-	userID := parts[0]
+	userID := strings.SplitN(val, ":", 2)[0]
 
 	if len(password) < 8 {
 		return nil, fmt.Errorf("password must be at least 8 characters")

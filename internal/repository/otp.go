@@ -18,6 +18,17 @@ func NewOTPRepository(db *pgxpool.Pool) *OTPRepository {
 	return &OTPRepository{db: db}
 }
 
+func (r *OTPRepository) GetTypeIDByName(ctx context.Context, name string) (string, error) {
+	var id string
+	err := r.db.QueryRow(ctx, `
+		SELECT id FROM auth.otp_type WHERE name = $1
+	`, name).Scan(&id)
+	if err != nil {
+		return "", fmt.Errorf("otp_type %q not found: %w", name, err)
+	}
+	return id, nil
+}
+
 func (r *OTPRepository) Create(ctx context.Context, typeID, codeHash, deliveryAddress string, expiresAt time.Time) error {
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO auth.otp (otp_type_id, code_hash, delivery_address, expires_at)

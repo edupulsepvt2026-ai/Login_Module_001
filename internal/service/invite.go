@@ -73,7 +73,7 @@ func (s *InviteService) VerifyToken(ctx context.Context, rawToken string) (*Veri
 
 	tempToken := uuid.New().String()
 	redisKey := fmt.Sprintf("invite_verify:%s", tempToken)
-	redisVal := fmt.Sprintf("%s:%s", invite.ManagementUserID.String(), ptrStr(user.Phone))
+	redisVal := fmt.Sprintf("%s:%s:%s", invite.ManagementUserID.String(), ptrStr(user.Phone), ptrStr(user.Email))
 
 	if err := s.redis.Set(ctx, redisKey, redisVal, 10*time.Minute).Err(); err != nil {
 		return nil, fmt.Errorf("failed to create verification session")

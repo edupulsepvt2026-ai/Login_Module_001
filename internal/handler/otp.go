@@ -17,6 +17,7 @@ func NewOTPHandler(otpSvc *service.OTPService) *OTPHandler {
 
 type sendOTPRequest struct {
 	TempToken string `json:"temp_token" binding:"required"`
+	Channel   string `json:"channel"    binding:"required,oneof=sms email"`
 }
 
 type verifyOTPRequest struct {
@@ -31,12 +32,16 @@ func (h *OTPHandler) Send(c *gin.Context) {
 		return
 	}
 
-	if err := h.otpSvc.SendOTP(c.Request.Context(), req.TempToken); err != nil {
+	if err := h.otpSvc.SendOTP(c.Request.Context(), req.TempToken, req.Channel); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
 
-	response.OK(c, gin.H{"message": "OTP sent"})
+	msg := "OTP sent to registered mobile number"
+	if req.Channel == "email" {
+		msg = "OTP sent to registered email address"
+	}
+	response.OK(c, gin.H{"message": msg})
 }
 
 func (h *OTPHandler) Verify(c *gin.Context) {

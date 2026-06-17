@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"log"
+
 	"auth-service/internal/service"
 	"auth-service/pkg/response"
 
@@ -22,7 +24,8 @@ type sendOTPRequest struct {
 
 type verifyOTPRequest struct {
 	TempToken string `json:"temp_token" binding:"required"`
-	OTP       string `json:"otp" binding:"required,len=6"`
+	Channel   string `json:"channel"    binding:"required,oneof=sms email"`
+	OTP       string `json:"otp"        binding:"required,len=6"`
 }
 
 func (h *OTPHandler) Send(c *gin.Context) {
@@ -51,11 +54,13 @@ func (h *OTPHandler) Verify(c *gin.Context) {
 		return
 	}
 
-	_, err := h.otpSvc.VerifyOTP(c.Request.Context(), req.TempToken, req.OTP)
+	userID, err := h.otpSvc.VerifyOTP(c.Request.Context(), req.TempToken, req.Channel, req.OTP)
 	if err != nil {
+		log.Printf("otp verify failed: %v", err)
 		response.Unauthorized(c, err.Error())
 		return
 	}
 
+	log.Printf("otp verified user_id=%s", userID)
 	response.OK(c, gin.H{"message": "OTP verified", "status": "otp_verified"})
 }

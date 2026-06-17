@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"auth-service/internal/repository"
@@ -23,43 +22,52 @@ func NewOTPService(otpRepo *repository.OTPRepository, redis *redis.Client, notif
 	return &OTPService{otpRepo: otpRepo, redis: redis, notifier: notifier}
 }
 
-// SendOTP sends a 6-digit OTP to the delivery address determined by channel ("sms" or "email").
+// SendOTP sends a 6-digit OTP to the delivery address for the given channel.
+// It does not change the verification state — only VerifyOTP marks a channel as verified.
 func (s *OTPService) SendOTP(ctx context.Context, tempToken, channel string) error {
 	if channel != "sms" && channel != "email" {
 		return fmt.Errorf("channel must be sms or email")
 	}
 
 	redisKey := fmt.Sprintf("invite_verify:%s", tempToken)
-	val, err := s.redis.Get(ctx, redisKey).Result()
+	session, err := loadSession(ctx, s.redis, redisKey)
 	if err != nil {
-		return fmt.Errorf("invalid or expired verification session")
+		return err
 	}
-
-	// Step 1 stores: {user_id}:{phone}:{email}
-	parts := strings.SplitN(val, ":", 3)
-	if len(parts) != 3 {
-		return fmt.Errorf("invalid session data")
-	}
-	userID, phone, email := parts[0], parts[1], parts[2]
 
 	var deliveryAddress, otpTypeName string
 	if channel == "sms" {
-		if phone == "" {
+		if session.Phone == "" {
 			return fmt.Errorf("phone not registered for this account")
 		}
-		deliveryAddress = phone
+		deliveryAddress = session.Phone
 		otpTypeName = "signup_sms"
 	} else {
-		if email == "" {
+		if session.Email == "" {
 			return fmt.Errorf("email not registered for this account")
 		}
-		deliveryAddress = email
+		deliveryAddress = session.Email
 		otpTypeName = "signup_email"
+	}
+
+	var lastSentAt *time.Time
+	if channel == "sms" {
+		lastSentAt = session.SMSLastSentAt
+	} else {
+		lastSentAt = session.EmailLastSentAt
+	}
+	if lastSentAt != nil && time.Since(*lastSentAt) < 60*time.Second {
+		remaining := 60 - int(time.Since(*lastSentAt).Seconds())
+		return fmt.Errorf("please wait %d seconds before requesting a new OTP", remaining)
 	}
 
 	otpTypeID, err := s.otpRepo.GetTypeIDByName(ctx, otpTypeName)
 	if err != nil {
 		return fmt.Errorf("OTP type configuration missing: %w", err)
+	}
+
+	if err := s.otpRepo.InvalidatePrevious(ctx, deliveryAddress); err != nil {
+		return fmt.Errorf("failed to invalidate previous OTP")
 	}
 
 	otp, err := crypto.GenerateOTP()
@@ -76,41 +84,44 @@ func (s *OTPService) SendOTP(ctx context.Context, tempToken, channel string) err
 
 	message := fmt.Sprintf("Your EduPulse OTP is %s. Valid for 5 minutes. Do not share.", otp)
 	if channel == "sms" {
-		if err := s.notifier.SendSMS(ctx, phone, message); err != nil {
-			return fmt.Errorf("failed to send OTP: %w", err)
-		}
+		err = s.notifier.SendSMS(ctx, deliveryAddress, message)
 	} else {
-		if err := s.notifier.SendEmail(ctx, email, "Your EduPulse OTP", message); err != nil {
-			return fmt.Errorf("failed to send OTP: %w", err)
-		}
+		err = s.notifier.SendEmail(ctx, deliveryAddress, "Your EduPulse OTP", message)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to send OTP: %w", err)
 	}
 
-	// Advance Redis state: append channel so VerifyOTP knows how to find the OTP
-	s.redis.Set(ctx, redisKey, fmt.Sprintf("%s:%s:%s:%s", userID, phone, email, channel), 10*time.Minute)
+	now := time.Now()
+	if channel == "sms" {
+		session.SMSLastSentAt = &now
+	} else {
+		session.EmailLastSentAt = &now
+	}
+	if err := saveSession(ctx, s.redis, redisKey, session); err != nil {
+		return fmt.Errorf("failed to update session")
+	}
 
 	return nil
 }
 
-// VerifyOTP validates the submitted OTP and marks the session as otp_verified.
-func (s *OTPService) VerifyOTP(ctx context.Context, tempToken, code string) (string, error) {
-	redisKey := fmt.Sprintf("invite_verify:%s", tempToken)
-	val, err := s.redis.Get(ctx, redisKey).Result()
-	if err != nil {
-		return "", fmt.Errorf("invalid or expired verification session")
+// VerifyOTP validates the submitted OTP and marks sms_verified or email_verified in the session.
+func (s *OTPService) VerifyOTP(ctx context.Context, tempToken, channel, code string) (string, error) {
+	if channel != "sms" && channel != "email" {
+		return "", fmt.Errorf("channel must be sms or email")
 	}
 
-	// Step 2 stores: {user_id}:{phone}:{email}:{channel}
-	parts := strings.SplitN(val, ":", 4)
-	if len(parts) != 4 {
-		return "", fmt.Errorf("OTP has not been sent yet for this session")
+	redisKey := fmt.Sprintf("invite_verify:%s", tempToken)
+	session, err := loadSession(ctx, s.redis, redisKey)
+	if err != nil {
+		return "", err
 	}
-	userID, phone, email, channel := parts[0], parts[1], parts[2], parts[3]
 
 	var deliveryAddress string
 	if channel == "sms" {
-		deliveryAddress = phone
+		deliveryAddress = session.Phone
 	} else {
-		deliveryAddress = email
+		deliveryAddress = session.Email
 	}
 
 	otp, err := s.otpRepo.GetActive(ctx, deliveryAddress)
@@ -131,10 +142,15 @@ func (s *OTPService) VerifyOTP(ctx context.Context, tempToken, code string) (str
 		return "", fmt.Errorf("failed to verify OTP")
 	}
 
-	// Advance Redis state: append :otp_verified so Step 4 knows OTP was completed
-	s.redis.Set(ctx, redisKey,
-		fmt.Sprintf("%s:%s:%s:%s:otp_verified", userID, phone, email, channel),
-		10*time.Minute)
+	if channel == "sms" {
+		session.SMSVerified = true
+	} else {
+		session.EmailVerified = true
+	}
 
-	return userID, nil
+	if err := saveSession(ctx, s.redis, redisKey, session); err != nil {
+		return "", fmt.Errorf("failed to update verification session")
+	}
+
+	return session.UserID, nil
 }

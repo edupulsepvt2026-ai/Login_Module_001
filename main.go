@@ -48,6 +48,8 @@ func main() {
 	otpRepo := repository.NewOTPRepository(masterDB)
 	sessionRepo := repository.NewSessionRepository(masterDB)
 	userRepo := repository.NewUserRepository(masterDB)
+	tenantUserRepo := repository.NewTenantUserRepository()
+	chainMapRepo := repository.NewChainMappingRepository(masterDB)
 
 	// Notify
 	notifier := notify.NewClient(cfg.OmnichannelURL)
@@ -56,12 +58,13 @@ func main() {
 	sessionSvc := service.NewSessionService(sessionRepo, userRepo, jwtManager)
 	inviteSvc := service.NewInviteService(inviteRepo, userRepo, rdb)
 	otpSvc := service.NewOTPService(otpRepo, rdb, notifier)
-	tokenSvc := service.NewTokenService(userRepo, sessionSvc, rdb)
+	tokenSvc := service.NewTokenService(userRepo, tenantUserRepo, chainMapRepo, sessionSvc, rdb, tenantMgr)
+	loginSvc := service.NewLoginService(chainMapRepo, tenantUserRepo, tenantMgr, sessionSvc)
 
 	// Handlers
 	inviteHandler := handler.NewInviteHandler(inviteSvc, tokenSvc)
 	otpHandler := handler.NewOTPHandler(otpSvc)
-	authHandler := handler.NewAuthHandler(sessionSvc, userRepo)
+	authHandler := handler.NewAuthHandler(loginSvc)
 	refreshHandler := handler.NewRefreshHandler(sessionSvc)
 	logoutHandler := handler.NewLogoutHandler(sessionSvc)
 

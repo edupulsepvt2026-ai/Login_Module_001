@@ -3,25 +3,22 @@ package handler
 import (
 	"log"
 
-	"auth-service/internal/repository"
 	"auth-service/internal/service"
-	"auth-service/pkg/crypto"
 	"auth-service/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
 
 type AuthHandler struct {
-	sessionSvc *service.SessionService
-	userRepo   *repository.UserRepository
+	loginSvc *service.LoginService
 }
 
-func NewAuthHandler(sessionSvc *service.SessionService, userRepo *repository.UserRepository) *AuthHandler {
-	return &AuthHandler{sessionSvc: sessionSvc, userRepo: userRepo}
+func NewAuthHandler(loginSvc *service.LoginService) *AuthHandler {
+	return &AuthHandler{loginSvc: loginSvc}
 }
 
 type loginRequest struct {
-	Email    string `json:"email" binding:"required,email"`
+	Email    string `json:"email"    binding:"required,email"`
 	Password string `json:"password" binding:"required"`
 }
 
@@ -33,27 +30,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userRepo.GetByEmail(c.Request.Context(), req.Email)
+	tokens, err := h.loginSvc.Login(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
-		log.Printf("login failed invalid credentials email=%s err=%v", req.Email, err)
-		response.UnauthorizedWithCode(c, "invalid_credentials", "invalid email or password")
+		log.Printf("login failed email=%s err=%v", req.Email, err)
+		response.UnauthorizedWithCode(c, "invalid_credentials", err.Error())
 		return
 	}
 
-	if user.PasswordHash == nil || !crypto.CheckPassword(*user.PasswordHash, req.Password) {
-		log.Printf("login failed invalid credentials email=%s", req.Email)
-		response.UnauthorizedWithCode(c, "invalid_credentials", "invalid email or password")
-		return
-	}
-
-	tokens, err := h.sessionSvc.CreateSession(c.Request.Context(), user)
-	if err != nil {
-		log.Printf("login failed create session email=%s err=%v", req.Email, err)
-		response.InternalErrorWithCode(c, "session_creation_failed", "failed to create session")
-		return
-	}
-
-	log.Printf("login success email=%s user_id=%s", req.Email, user.ID.String())
+	log.Printf("login success email=%s", req.Email)
 	response.OK(c, gin.H{
 		"access_token":  tokens.AccessToken,
 		"refresh_token": tokens.RefreshToken,

@@ -66,6 +66,17 @@ func (r *OTPRepository) GetActive(ctx context.Context, deliveryAddress string) (
 	return otp, nil
 }
 
+func (r *OTPRepository) InvalidatePrevious(ctx context.Context, deliveryAddress string) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE auth.otp
+		SET is_used = true
+		WHERE delivery_address = $1
+		  AND is_used = false
+		  AND expires_at > now()
+	`, deliveryAddress)
+	return err
+}
+
 func (r *OTPRepository) IncrementAttempt(ctx context.Context, otpID string) error {
 	_, err := r.db.Exec(ctx, `
 		UPDATE auth.otp SET attempts = attempts + 1 WHERE id = $1

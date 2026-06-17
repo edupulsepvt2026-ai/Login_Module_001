@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+
 type InviteService struct {
 	inviteRepo *repository.InviteRepository
 	userRepo   *repository.UserRepository
@@ -73,9 +74,14 @@ func (s *InviteService) VerifyToken(ctx context.Context, rawToken string) (*Veri
 
 	tempToken := uuid.New().String()
 	redisKey := fmt.Sprintf("invite_verify:%s", tempToken)
-	redisVal := fmt.Sprintf("%s:%s:%s", invite.ManagementUserID.String(), ptrStr(user.Phone), ptrStr(user.Email))
-
-	if err := s.redis.Set(ctx, redisKey, redisVal, 10*time.Minute).Err(); err != nil {
+	session := &inviteSession{
+		UserID:        invite.ManagementUserID.String(),
+		Phone:         ptrStr(user.Phone),
+		Email:         ptrStr(user.Email),
+		SMSVerified:   false,
+		EmailVerified: false,
+	}
+	if err := saveSession(ctx, s.redis, redisKey, session); err != nil {
 		return nil, fmt.Errorf("failed to create verification session")
 	}
 

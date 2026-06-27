@@ -12,9 +12,12 @@ import (
 
 const (
 	// Context keys
-	TenantIDContextKey = "tenant_id"
-	TenantDBContextKey = "tenant_db"
-	TenantMIDHeaderKey = "X-Tenant-MID" // or "mid" depending on your API spec
+	TenantIDContextKey        = "tenant_id"
+	TenantDBContextKey        = "tenant_db"
+	TenantMIDHeaderKey        = "X-Tenant-MID" // or "mid" depending on your API spec
+	TenantMIDAltHeaderKey     = "mid"
+	TenantChainIDHeaderKey    = "chain_id"
+	TenantChainIDAltHeaderKey = "X-Chain-ID"
 )
 
 // TenantDBMiddleware extracts tenant mid from header and loads tenant DB pool
@@ -24,12 +27,26 @@ func TenantDBMiddleware(tenantMgr *db.TenantPoolManager) gin.HandlerFunc {
 		mid := c.GetHeader(TenantMIDHeaderKey)
 		if mid == "" {
 			// Try alternate header name
-			mid = c.GetHeader("mid")
+			mid = c.GetHeader(TenantMIDAltHeaderKey)
+		}
+		if mid == "" {
+			// Accept chain_id header as the tenant identifier used for tenant DB lookup
+			mid = c.GetHeader(TenantChainIDHeaderKey)
+		}
+		if mid == "" {
+			mid = c.GetHeader(TenantChainIDAltHeaderKey)
+		}
+		if mid == "" {
+			if val, exists := c.Get("chain_id"); exists {
+				if chainID, ok := val.(string); ok && chainID != "" {
+					mid = chainID
+				}
+			}
 		}
 
 		if mid == "" {
 			c.JSON(400, gin.H{
-				"error": fmt.Sprintf("missing required header: %s or mid", TenantMIDHeaderKey),
+				"error": fmt.Sprintf("missing required header: %s, %s, or %s", TenantMIDHeaderKey, TenantMIDAltHeaderKey, TenantChainIDHeaderKey),
 			})
 			c.Abort()
 			return

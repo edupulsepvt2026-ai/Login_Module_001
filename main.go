@@ -80,7 +80,7 @@ func main() {
 		public.POST("/refresh", middleware.TenantDBMiddleware(tenantMgr), refreshHandler.Refresh)
 	}
 
-	protected := r.Group("/auth", middleware.JWTMiddleware(jwtManager))
+	protected := r.Group("/auth", middleware.JWTMiddleware(jwtManager), middleware.TenantDBMiddleware(tenantMgr))
 	{
 		protected.POST("/logout", logoutHandler.Logout)
 	}

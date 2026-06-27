@@ -90,9 +90,19 @@ func (r *TenantUserRepository) Create(
 func (r *TenantUserRepository) GetByID(ctx context.Context, pool *pgxpool.Pool, userID string) (*model.TenantUser, error) {
 	user := &model.TenantUser{}
 	err := pool.QueryRow(ctx, `
-		SELECT id, chain_id, email, phone, name, password_hash, is_active
-		FROM auth.user
-		WHERE id = $1 AND is_active = true
+		SELECT
+			u.id,
+			CASE WHEN LOWER(mt.name) = 'chain' THEN u.management_id ELSE m.chain_id END AS chain_id,
+			u.email,
+			u.phone,
+			u.name,
+			u.password_hash,
+			u.is_active
+		FROM auth."user" u
+		JOIN auth.management_type mt ON u.management_type_id = mt.id
+		LEFT JOIN management.management_table m ON u.management_id = m.tenant_id
+		WHERE u.id = $1
+		  AND u.is_active = true
 	`, userID).Scan(
 		&user.ID, &user.ChainID, &user.Email, &user.Phone,
 		&user.Name, &user.PasswordHash, &user.IsActive,

@@ -32,7 +32,7 @@ func Setup(h *Handlers, jwtManager *pkgjwt.Manager, tenantMgr *db.TenantPoolMana
 	}
 
 	// protected routes — JWT required
-	protected := r.Group("/auth", middleware.JWTMiddleware(jwtManager))
+	protected := r.Group("/auth", middleware.JWTMiddleware(jwtManager), middleware.TenantDBMiddleware(tenantMgr))
 	{
 		protected.POST("/logout", h.Logout.Logout)
 	}

@@ -46,7 +46,7 @@ func (s *LoginService) Login(ctx context.Context, email, password string) (*Toke
 	// Step B — connect to that chain's tenant DB
 	tenantPool, err := s.tenantMgr.GetOrLoad(ctx, mapping.ChainID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid email or password")
+		return nil, fmt.Errorf("Can't find tenant database for chain_id=%s: %w", mapping.ChainID, err)
 	}
 
 	// Step C — fetch user record and verify password
@@ -56,9 +56,9 @@ func (s *LoginService) Login(ctx context.Context, email, password string) (*Toke
 	}
 	log.Printf("checking password hash for user: %s", tenantUser.ID)
 	if tenantUser.PasswordHash == nil || !crypto.CheckPassword(*tenantUser.PasswordHash, password) {
-		return nil, fmt.Errorf("invalid email or password")
+		return nil, fmt.Errorf("invalid  password")
 	}
-    log.Printf("password verified for user: %s", tenantUser.ID) 
+	log.Printf("password verified for user: %s", tenantUser.ID)
 	// Build a ManagementUser with the IDs needed for JWT claims and session creation
 	userID, err := uuid.Parse(mapping.UserID)
 	if err != nil {

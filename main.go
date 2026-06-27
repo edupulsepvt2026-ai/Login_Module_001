@@ -46,7 +46,7 @@ func main() {
 	// Repositories
 	inviteRepo := repository.NewInviteRepository(masterDB)
 	otpRepo := repository.NewOTPRepository(masterDB)
-	sessionRepo := repository.NewSessionRepository(masterDB)
+	sessionRepo := repository.NewSessionRepository()
 	userRepo := repository.NewUserRepository(masterDB)
 	tenantUserRepo := repository.NewTenantUserRepository()
 	chainMapRepo := repository.NewChainMappingRepository(masterDB)
@@ -77,7 +77,7 @@ func main() {
 		public.POST("/otp/send", otpHandler.Send)
 		public.POST("/otp/verify", otpHandler.Verify)
 		public.POST("/login", authHandler.Login)
-		public.POST("/refresh", refreshHandler.Refresh)
+		public.POST("/refresh", middleware.TenantDBMiddleware(tenantMgr), refreshHandler.Refresh)
 	}
 
 	protected := r.Group("/auth", middleware.JWTMiddleware(jwtManager))

@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"auth-service/db"
+	"auth-service/internal/middleware"
 	"auth-service/internal/model"
 	"auth-service/internal/repository"
 	"auth-service/pkg/crypto"
@@ -51,13 +52,13 @@ func (s *LoginService) Login(ctx context.Context, email, password string) (*Toke
 	// Step C — fetch user record and verify password
 	tenantUser, err := s.tenantUserRepo.GetByID(ctx, tenantPool, mapping.UserID)
 	if err != nil || !tenantUser.IsActive {
-		return nil, fmt.Errorf("invalid email or password")
+		return nil, fmt.Errorf("invalid email or password chain user not found")
 	}
-
+	log.Printf("checking password hash for user: %s", tenantUser.ID)
 	if tenantUser.PasswordHash == nil || !crypto.CheckPassword(*tenantUser.PasswordHash, password) {
 		return nil, fmt.Errorf("invalid email or password")
 	}
-
+    log.Printf("password verified for user: %s", tenantUser.ID) 
 	// Build a ManagementUser with the IDs needed for JWT claims and session creation
 	userID, err := uuid.Parse(mapping.UserID)
 	if err != nil {
@@ -73,5 +74,7 @@ func (s *LoginService) Login(ctx context.Context, email, password string) (*Toke
 		ChainID: chainID,
 	}
 
+	// Ensure the tenant pool is available in the context for session persistence
+	ctx = context.WithValue(ctx, middleware.TenantDBContextKey, tenantPool)
 	return s.sessionSvc.CreateSession(ctx, mgmtUser)
 }

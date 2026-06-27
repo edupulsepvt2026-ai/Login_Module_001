@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"auth-service/db"
+	"auth-service/internal/middleware"
 	"auth-service/internal/repository"
 	"auth-service/pkg/crypto"
 
@@ -92,5 +93,7 @@ func (s *TokenService) SetPasswordAndActivate(ctx context.Context, tempToken, pa
 	// Clean up the Redis session now that account is fully activated
 	s.redis.Del(ctx, redisKey)
 
+	// Ensure the tenant pool is available in the context for session persistence
+	ctx = context.WithValue(ctx, middleware.TenantDBContextKey, tenantPool)
 	return s.sessionSvc.CreateSession(ctx, mgmtUser)
 }

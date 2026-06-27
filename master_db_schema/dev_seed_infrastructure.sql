@@ -13,8 +13,10 @@
 -- ================================================================
 
 -- ── Entry 1: Velammal chain ──────────────────────────────────
--- Plaintext password : Edupulse@2026
--- Nonce              : 000000000000000000000001
+-- host     : localhost
+-- db_name  : crew_campus_velammal_tenant
+-- user     : postgres
+-- password : root  (stored as plaintext for local dev — no encryption)
 
 DELETE FROM infrastructure.chain_database
 WHERE id = 'dddddddd-0001-4000-8000-000000000001';
@@ -34,13 +36,13 @@ INSERT INTO infrastructure.chain_database (
     is_active
 ) VALUES (
     'dddddddd-0001-4000-8000-000000000001',
-    'bbbbbbbb-0001-4000-8000-000000000001',  -- Second chain
-    'db.hqtrzgykhejxqgsxqfkp.supabase.co',
+    'bbbbbbbb-0001-4000-8000-000000000001',  -- Velammal chain
+    'localhost',
     5432,
+    'crew_campus_velammal_tenant',
     'postgres',
-    'postgres',
-    'AAAAAAAAAAAAAAAC0E+kuTUBrioQ39JaX1SyfYQZOqZg7l6AKWoNsA==',  -- AES-GCM("Edupulse@123", "dummy-encryption-key")
-    'require',
+    'root',
+    'disable',
     20,
     10,
     5,

@@ -20,19 +20,70 @@ func NewTenantUserRepository() *TenantUserRepository {
 func (r *TenantUserRepository) Create(
 	ctx context.Context,
 	pool *pgxpool.Pool,
-	userID, chainID string,
+	userID string,
+	managementID string,
 	email, phone *string,
 	name, passwordHash string,
 ) error {
-	_, err := pool.Exec(ctx, `
-		INSERT INTO auth.user (
-			id, chain_id, email, phone, name, password_hash,
-			is_email_verified, is_phone_verified, is_active, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, true, true, true, now(), now())
-	`, userID, chainID, email, phone, name, passwordHash)
+
+	var (
+		managementTypeID string
+		roleID           string
+	)
+
+	err := pool.QueryRow(
+		ctx,
+		`
+		SELECT
+			(SELECT id
+			 FROM auth.management_type
+			 WHERE LOWER(name) = 'chain'),
+			(SELECT id
+			 FROM auth.role
+			 WHERE LOWER(name) = 'chain_admin')
+		`,
+	).Scan(&managementTypeID, &roleID)
+
 	if err != nil {
-		return fmt.Errorf("failed to create tenant user: %w", err)
+		return fmt.Errorf("failed to get chain management type and role: %w", err)
 	}
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO auth.user (
+			id,
+			role_id,
+			management_type_id,
+			management_id,
+			email,
+			phone,
+			name,
+			password_hash,
+			is_email_verified,
+			is_phone_verified,
+			is_active,
+			created_at,
+			updated_at
+		)
+		VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8,
+			true, true, true,
+			now(), now()
+		)
+	`,
+		userID,
+		roleID,
+		managementTypeID,
+		managementID,
+		email,
+		phone,
+		name,
+		passwordHash,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to create user: %w", err)
+	}
+
 	return nil
 }
 

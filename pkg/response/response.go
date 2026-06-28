@@ -42,6 +42,10 @@ func Forbidden(c *gin.Context, err string) {
 	ErrorResponse(c, 403, "forbidden", err)
 }
 
+func Conflict(c *gin.Context, err string) {
+	ErrorResponse(c, 409, "conflict", err)
+}
+
 func InternalError(c *gin.Context, err string) {
 	ErrorResponse(c, 500, "internal_error", err)
 }

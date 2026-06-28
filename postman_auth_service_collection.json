@@ -2,229 +2,285 @@
   "info": {
     "name": "Auth Service API Collection",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "version": "1.0.0",
-    "description": "Postman collection for auth-service endpoints. Use {{base_url}} to point to your local server."
+    "version": "2.0.0",
+    "description": "EduPulse auth-service — chain admin onboarding + tenant admin onboarding.\nUse {{base_url}} for the server address.\nTokens and temp_token are captured automatically by test scripts."
   },
   "variable": [
-    {
-      "key": "base_url",
-      "value": "http://localhost:8080"
-    },
-    {
-      "key": "invite_token",
-      "value": ""
-    },
-    {
-      "key": "temp_token",
-      "value": ""
-    },
-    {
-      "key": "otp",
-      "value": ""
-    },
-    {
-      "key": "email",
-      "value": "admin@example.com"
-    },
-    {
-      "key": "password",
-      "value": "Password123!"
-    },
-    {
-      "key": "access_token",
-      "value": ""
-    },
-    {
-      "key": "refresh_token",
-      "value": ""
-    }
+    { "key": "base_url",      "value": "http://localhost:8080" },
+    { "key": "invite_token",  "value": "" },
+    { "key": "temp_token",    "value": "" },
+    { "key": "otp",           "value": "" },
+    { "key": "email",         "value": "rajesh.kumar@velammal.edu.in" },
+    { "key": "password",      "value": "Test@1234" },
+    { "key": "access_token",  "value": "" },
+    { "key": "refresh_token", "value": "" },
+    { "key": "chain_id",      "value": "bbbbbbbb-0001-4000-8000-000000000001" },
+    { "key": "branch_id",     "value": "dddddddd-0001-4000-8000-000000000001" }
   ],
   "item": [
     {
-      "name": "Invite Verify",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"token\": \"{{invite_token}}\"\n}"
-        },
-        "url": {
-          "raw": "{{base_url}}/auth/invite/verify",
-          "host": [
-            "{{base_url}}"
+      "name": "Phase 1 — Chain Admin Account Activation",
+      "item": [
+        {
+          "name": "Step 1 — Invite Verify",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data.temp_token) {",
+                  "    pm.collectionVariables.set('temp_token', res.data.temp_token);",
+                  "    console.log('temp_token saved:', res.data.temp_token);",
+                  "}"
+                ]
+              }
+            }
           ],
-          "path": [
-            "auth",
-            "invite",
-            "verify"
-          ]
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{invite_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/invite/verify",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "invite", "verify"]
+            },
+            "description": "Verifies the magic link token sent by email after payment.\nReturns temp_token (valid 20 min) — required for OTP and set-password steps.\nAlso returns user name, masked email/phone, chain info."
+          }
+        },
+        {
+          "name": "Step 2a — OTP Send (SMS)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"channel\": \"sms\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/otp/send",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "otp", "send"]
+            },
+            "description": "Sends a 6-digit OTP to the chain admin's registered phone number.\nchannel must be \"sms\" or \"email\"."
+          }
+        },
+        {
+          "name": "Step 3a — OTP Verify (SMS)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"channel\": \"sms\",\n  \"otp\": \"{{otp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/otp/verify",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "otp", "verify"]
+            },
+            "description": "Verifies the SMS OTP. Sets sms_verified = true in the Redis session.\nBoth SMS and email must be verified before set-password."
+          }
+        },
+        {
+          "name": "Step 2b — OTP Send (Email)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"channel\": \"email\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/otp/send",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "otp", "send"]
+            },
+            "description": "Sends a 6-digit OTP to the chain admin's registered email address.\nCan be done before or after SMS OTP — order does not matter."
+          }
+        },
+        {
+          "name": "Step 3b — OTP Verify (Email)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"channel\": \"email\",\n  \"otp\": \"{{otp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/otp/verify",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "otp", "verify"]
+            },
+            "description": "Verifies the email OTP. Sets email_verified = true in the Redis session."
+          }
+        },
+        {
+          "name": "Step 4 — Set Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data) {",
+                  "    pm.collectionVariables.set('access_token',  res.data.access_token);",
+                  "    pm.collectionVariables.set('refresh_token', res.data.refresh_token);",
+                  "    console.log('tokens saved after set-password');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/invite/set-password",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "invite", "set-password"]
+            },
+            "description": "Sets the chain admin's password and activates the account.\nBoth SMS and email OTPs must be verified before this step.\nReturns access_token + refresh_token on success."
+          }
         }
-      }
+      ]
     },
     {
-      "name": "OTP Send",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"temp_token\": \"{{temp_token}}\"\n}"
-        },
-        "url": {
-          "raw": "{{base_url}}/auth/otp/send",
-          "host": [
-            "{{base_url}}"
+      "name": "Phase 2 — Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data) {",
+                  "    pm.collectionVariables.set('access_token',  res.data.access_token);",
+                  "    pm.collectionVariables.set('refresh_token', res.data.refresh_token);",
+                  "    console.log('tokens saved after login');",
+                  "}"
+                ]
+              }
+            }
           ],
-          "path": [
-            "auth",
-            "otp",
-            "send"
-          ]
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Authenticates a chain admin with email + password.\nReturns access_token (15 min) + refresh_token (7 days).\nTokens are auto-saved to collection variables."
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data) {",
+                  "    pm.collectionVariables.set('access_token',  res.data.access_token);",
+                  "    pm.collectionVariables.set('refresh_token', res.data.refresh_token);",
+                  "    console.log('tokens rotated');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "chain_id",     "value": "{{chain_id}}", "description": "Required — TenantDB middleware uses this to load the correct DB pool. JWT middleware does not run on this route." }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "refresh"]
+            },
+            "description": "Exchanges a refresh token for a new access + refresh token pair (rotation).\nRequires chain_id header because JWT middleware does not run on this route.\nNew tokens are auto-saved to collection variables."
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type",  "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "logout"]
+            },
+            "description": "Revokes the current session. Requires a valid access_token.\nchain_id is extracted automatically from JWT claims — no extra header needed."
+          }
         }
-      }
+      ]
     },
     {
-      "name": "OTP Verify",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
+      "name": "Phase 3 — Tenant Admin Onboarding",
+      "item": [
+        {
+          "name": "Step 8 — Get Branches",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/chain-admin/branches",
+              "host": ["{{base_url}}"],
+              "path": ["chain-admin", "branches"]
+            },
+            "description": "Returns all active branches under the chain admin's chain.\nEach branch includes has_tenant_admin flag so the frontend knows which branches are already covered.\nchain_id is extracted from the JWT — no extra header needed."
           }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"otp\": \"{{otp}}\"\n}"
         },
-        "url": {
-          "raw": "{{base_url}}/auth/otp/verify",
-          "host": [
-            "{{base_url}}"
-          ],
-          "path": [
-            "auth",
-            "otp",
-            "verify"
-          ]
-        }
-      }
-    },
-    {
-      "name": "Invite Set Password",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
+        {
+          "name": "Step 9 — Invite Tenant Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type",  "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"branch_id\": \"{{branch_id}}\",\n  \"name\": \"Priya Rajan\",\n  \"email\": \"priya@velammal-madurai.edu.in\",\n  \"mobile\": \"+919876543210\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/chain-admin/tenant-admins",
+              "host": ["{{base_url}}"],
+              "path": ["chain-admin", "tenant-admins"]
+            },
+            "description": "Creates a tenant_admin user for the given branch and sends an invite link.\nbranch_id = tenant_id from management.management_table (returned by Step 8).\nAt least email or mobile is required — email is preferred for delivery.\nReturns invite_id, delivery_channel, and confirmation message."
           }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"password\": \"{{password}}\"\n}"
-        },
-        "url": {
-          "raw": "{{base_url}}/auth/invite/set-password",
-          "host": [
-            "{{base_url}}"
-          ],
-          "path": [
-            "auth",
-            "invite",
-            "set-password"
-          ]
         }
-      }
-    },
-    {
-      "name": "Login",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
-        },
-        "url": {
-          "raw": "{{base_url}}/auth/login",
-          "host": [
-            "{{base_url}}"
-          ],
-          "path": [
-            "auth",
-            "login"
-          ]
-        }
-      }
-    },
-    {
-      "name": "Refresh Token",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
-        },
-        "url": {
-          "raw": "{{base_url}}/auth/refresh",
-          "host": [
-            "{{base_url}}"
-          ],
-          "path": [
-            "auth",
-            "refresh"
-          ]
-        }
-      }
-    },
-    {
-      "name": "Logout",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          },
-          {
-            "key": "Authorization",
-            "value": "Bearer {{access_token}}"
-          }
-        ],
-        "url": {
-          "raw": "{{base_url}}/auth/logout",
-          "host": [
-            "{{base_url}}"
-          ],
-          "path": [
-            "auth",
-            "logout"
-          ]
-        }
-      }
+      ]
     }
   ]
 }

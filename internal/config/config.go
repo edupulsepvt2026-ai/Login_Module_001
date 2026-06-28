@@ -17,7 +17,9 @@ type Config struct {
 	MasterDBUser     string
 	MasterDBPassword string
 
-	OmnichannelURL string
+	OmnichannelURL     string
+	InviteBaseURL      string
+	CORSAllowedOrigins string
 
 	RedisAddr     string
 	RedisPassword string
@@ -44,7 +46,9 @@ func Load() *Config {
 		MasterDBUser:     getEnv("MASTER_DB_USER", "postgres"),
 		MasterDBPassword: getEnv("MASTER_DB_PASSWORD", ""),
 
-		OmnichannelURL: getEnv("OMNICHANNEL_URL", "http://localhost:8001"),
+		OmnichannelURL:     getEnv("OMNICHANNEL_URL", "http://localhost:8001"),
+		InviteBaseURL:      getEnv("INVITE_BASE_URL", "https://campuscrew.app/invite"),
+		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "*"),
 
 		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),

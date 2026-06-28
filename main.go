@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"auth-service/db"
@@ -14,6 +15,7 @@ import (
 	pkgjwt "auth-service/pkg/jwt"
 	"auth-service/pkg/notify"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
@@ -50,6 +52,7 @@ func main() {
 	userRepo := repository.NewUserRepository(masterDB)
 	tenantUserRepo := repository.NewTenantUserRepository()
 	chainMapRepo := repository.NewChainMappingRepository(masterDB)
+	chainAdminRepo := repository.NewChainAdminRepository()
 
 	// Notify
 	notifier := notify.NewClient(cfg.OmnichannelURL)
@@ -60,6 +63,7 @@ func main() {
 	otpSvc := service.NewOTPService(otpRepo, rdb, notifier)
 	tokenSvc := service.NewTokenService(userRepo, tenantUserRepo, chainMapRepo, sessionSvc, rdb, tenantMgr)
 	loginSvc := service.NewLoginService(chainMapRepo, tenantUserRepo, tenantMgr, sessionSvc)
+	chainAdminSvc := service.NewChainAdminService(chainAdminRepo, notifier, cfg.InviteBaseURL)
 
 	// Handlers
 	inviteHandler := handler.NewInviteHandler(inviteSvc, tokenSvc)
@@ -67,8 +71,18 @@ func main() {
 	authHandler := handler.NewAuthHandler(loginSvc)
 	refreshHandler := handler.NewRefreshHandler(sessionSvc)
 	logoutHandler := handler.NewLogoutHandler(sessionSvc)
+	chainAdminHandler := handler.NewChainAdminHandler(chainAdminSvc)
 
 	r := gin.Default()
+
+	origins := strings.Split(cfg.CORSAllowedOrigins, ",")
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     origins,
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "chain_id", "X-Tenant-MID"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	public := r.Group("/auth")
 	{
@@ -83,6 +97,12 @@ func main() {
 	protected := r.Group("/auth", middleware.JWTMiddleware(jwtManager), middleware.TenantDBMiddleware(tenantMgr))
 	{
 		protected.POST("/logout", logoutHandler.Logout)
+	}
+
+	chainAdmin := r.Group("/chain-admin", middleware.JWTMiddleware(jwtManager), middleware.TenantDBMiddleware(tenantMgr))
+	{
+		chainAdmin.GET("/branches", chainAdminHandler.GetBranches)
+		chainAdmin.POST("/tenant-admins", chainAdminHandler.InviteTenantAdmin)
 	}
 
 	addr := fmt.Sprintf(":%s", cfg.Port)

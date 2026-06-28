@@ -36,10 +36,12 @@ func (h *OTPHandler) Send(c *gin.Context) {
 	}
 
 	if err := h.otpSvc.SendOTP(c.Request.Context(), req.TempToken, req.Channel); err != nil {
+		log.Printf("otp send failed: channel=%s err=%v", req.Channel, err)
 		response.BadRequest(c, err.Error())
 		return
 	}
 
+	log.Printf("otp sent: channel=%s", req.Channel)
 	msg := "OTP sent to registered mobile number"
 	if req.Channel == "email" {
 		msg = "OTP sent to registered email address"
@@ -56,11 +58,11 @@ func (h *OTPHandler) Verify(c *gin.Context) {
 
 	userID, err := h.otpSvc.VerifyOTP(c.Request.Context(), req.TempToken, req.Channel, req.OTP)
 	if err != nil {
-		log.Printf("otp verify failed: %v", err)
+		log.Printf("otp verify failed: channel=%s err=%v", req.Channel, err)
 		response.Unauthorized(c, err.Error())
 		return
 	}
 
-	log.Printf("otp verified user_id=%s", userID)
+	log.Printf("otp verified: channel=%s user_id=%s", req.Channel, userID)
 	response.OK(c, gin.H{"message": "OTP verified", "status": "otp_verified"})
 }

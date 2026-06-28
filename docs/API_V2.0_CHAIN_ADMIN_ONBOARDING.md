@@ -205,15 +205,21 @@ INSERT
     user_id    = management_user.id
     metadata   = { "chain_id": "...", "ip": "..." }
 
+UPDATE  (mark invite consumed immediately)
+  auth.invite
+    SET status_id  = (SELECT id FROM auth.invite_status WHERE name = 'accepted')
+        accepted_at = now()
+    WHERE id = invite.id
+
 REDIS SET
   key   : invite_verify:{temp_token}
-  value : {user_id}:{phone}:{email}
-  TTL   : 10 minutes
-  → both phone and email stored so Step 2 can deliver to either channel
+  value : JSON (see Redis Key Structure below)
+  TTL   : 20 minutes
+  → full session JSON stored so Steps 2–4 can deliver OTPs and track verification state
 ```
 
-> **Rule:** Do NOT update `auth.invite` status here yet.
-> Status moves to `accepted` only in Step 4 after password is set successfully.
+> **Rule:** `auth.invite` status is set to `accepted` immediately in Step 1 once the token is validated.
+> This prevents the same link from being reused if the tab is refreshed or the link is shared.
 
 ---
 
@@ -452,15 +458,7 @@ POST /api/v1/auth/invite/set-password
   "data": {
     "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     "refresh_token": "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4...",
-    "expires_in": 900,
-    "user": {
-      "id": "user-uuid",
-      "name": "Rajesh Kumar",
-      "email": "rajesh@vellamal.edu.in",
-      "role": "chain_admin",
-      "chain_id": "chain-uuid",
-      "chain_name": "Velammal Educational Trust"
-    }
+    "expires_in": 900
   }
 }
 ```
@@ -506,13 +504,6 @@ INSERT  (TENANT DB — user record with credentials)
     created_at        = now()
     updated_at        = now()
 
-UPDATE  (MASTER DB — mark invite consumed)
-  auth.invite
-    SET status_id   = (SELECT id FROM auth.invite_status WHERE name = 'accepted')
-        accepted_at = now()
-    WHERE management_user_id = user_id
-      AND accepted_at IS NULL
-
 INSERT  (MASTER DB — identity routing index)
   auth.chain_user_mapping
     user_id     = user_id  (the auth.user.id just inserted in tenant DB)
@@ -555,20 +546,21 @@ REDIS DEL
   → clean up verification session immediately after commit
 ```
 
-> **Rule:** All DB operations in Step 4 run inside a **distributed transaction** spanning both Master DB and Tenant DB.
-> If any step fails — auth.user insert, chain_user_mapping insert, or session creation — roll back all writes.
-> If chain_user_mapping insert fails, the account must not be created: without the routing entry the user can never log in.
+> **Rule:** If `auth.user` (tenant DB) or `auth.chain_user_mapping` (master DB) insert fails, the account is incomplete.
+> Without the routing entry the user can never log in.
+> Note: `auth.invite` status was already set to `accepted` in Step 1 — it is not touched here.
+> Redis session key is deleted immediately after successful account activation.
 
 ---
 
 ## Token Lifecycle
 
 ```
-Invite token  →  Single use, 48 hour TTL, stored as SHA256 hash in auth.invite
-temp_token    →  Single session, 20 minute TTL, stored in Redis only (JSON)
-OTP           →  6 digits, 5 minute TTL, max 3 attempts, stored as SHA256 in auth.otp
-access_token  →  JWT, 15 minute TTL, hash stored in auth.session
-refresh_token →  Opaque, 7 day TTL, hash stored in auth.session, rotated on each use
+Invite token  →  Single use, 48 hour TTL, SHA256 hash in auth.invite. Marked 'accepted' on Step 1.
+temp_token    →  Single session, 20 minute TTL, JSON in Redis. Deleted after Step 4.
+OTP           →  6 digits, 5 minute TTL, max 3 attempts, SHA256 in auth.otp
+access_token  →  JWT, 15 minute TTL, SHA256 hash in auth.session (tenant DB)
+refresh_token →  Opaque, 7 day TTL, SHA256 hash in auth.session, rotated on each use
 ```
 
 ---
@@ -605,13 +597,14 @@ Key: `invite_verify:{temp_token}` — JSON value, TTL 20 minutes (reset on each 
 ## Important Rules for Frontend
 
 1. Store `temp_token` in memory only (not localStorage) — it is short-lived.
-2. After Step 4 succeeds, store `access_token` and `refresh_token` securely.
+2. After Step 4 or Step 5 succeeds, both `access_token` and `refresh_token` are returned in the response body. Store them securely.
 3. Send `access_token` in every authenticated request:
    ```
    Authorization: Bearer <access_token>
    ```
-4. When an API returns `401`, use `refresh_token` to get a new `access_token` via `/auth/refresh`.
-5. If `refresh_token` also returns `401`, session is fully expired — redirect to login.
+4. When an API returns `401`, call `POST /auth/refresh` with `{ "refresh_token": "..." }` to get a new token pair.
+5. After a successful refresh, replace both stored tokens with the new ones from the response.
+6. If `/auth/refresh` also returns `401`, session is fully expired — redirect to login.
 
 ---
 
@@ -672,34 +665,20 @@ POST /api/v1/auth/login
   "success": true,
   "data": {
     "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "expires_in": 900,
-    "user": {
-      "id": "user-uuid",
-      "name": "Rajesh Kumar",
-      "email": "rajesh@vellamal.edu.in",
-      "role": "chain_admin",
-      "chain_id": "chain-uuid",
-      "chain_name": "Velammal Educational Trust"
-    }
+    "refresh_token": "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4...",
+    "expires_in": 900
   }
 }
 ```
 
-> **Token storage:**
-> - `access_token` — returned in response body, frontend stores in localStorage
-> - `refresh_token` — sent as httpOnly cookie by backend, frontend never touches it
->   ```
->   Set-Cookie: refresh_token=xxx; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth/refresh
->   ```
+> Both `access_token` and `refresh_token` are returned in the response body.
 
 **Error Responses**
 
-| HTTP | Error                          | Reason                                        |
-|------|--------------------------------|-----------------------------------------------|
-| 401  | `invalid email or password`    | User not found or password mismatch           |
-| 403  | `account is not active`        | Account deactivated                           |
-| 423  | `account is locked`            | 5 failed attempts — locked for 30 minutes    |
-| 400  | `email and password required`  | Missing fields                                |
+| HTTP | Code                  | Error                             | Reason                                        |
+|------|-----------------------|-----------------------------------|-----------------------------------------------|
+| 401  | `invalid_credentials` | `invalid email or password`       | User not found or password mismatch           |
+| 400  | `invalid_request`     | `email and password are required` | Missing or invalid fields                     |
 
 **Database Operations**
 
@@ -759,7 +738,7 @@ UPDATE  (on success)
     WHERE id = user_id
 
 INSERT
-  auth.session
+  auth.session  (TENANT DB)
     user_id                  = user_id
     access_token_hash        = SHA256(access_token)
     refresh_token_hash       = SHA256(refresh_token)
@@ -767,12 +746,6 @@ INSERT
     refresh_token_expires_at = now() + 7 days
     ip_address               = request IP
     user_agent               = request User-Agent
-
-INSERT
-  auth.audit_log
-    event_type = 'login_success' or 'login_failure'
-    user_id    = user_id
-    metadata   = { "ip": "...", "user_agent": "...", "chain_id": "..." }
 ```
 
 > **Why two databases at login?** The master DB routing query is a single indexed lookup on `auth.chain_user_mapping.email`.
@@ -784,22 +757,24 @@ INSERT
 
 ### STEP 6 — Refresh Token
 
-Issues a new access token using the refresh token from the httpOnly cookie.
-Called automatically by the frontend when the access token expires.
+Issues a new access and refresh token pair using the current refresh token.
+Called by the frontend when the access token expires.
 
 ```
 POST /api/v1/auth/refresh
 ```
 
 **Database:** Tenant DB  
-**Auth Required:** No (uses httpOnly cookie)
+**Auth Required:** No
 
-**Request**
+**Request Body**
 
-No request body needed. Browser automatically sends the httpOnly cookie.
+| Field           | Type   | Required | Description                            |
+|-----------------|--------|----------|----------------------------------------|
+| `refresh_token` | string | Yes      | Opaque refresh token from login/refresh response |
 
-```
-Cookie: refresh_token=opaque_refresh_token_here
+```json
+{ "refresh_token": "opaque_refresh_token_here" }
 ```
 
 **Success Response — 200**
@@ -809,26 +784,27 @@ Cookie: refresh_token=opaque_refresh_token_here
   "success": true,
   "data": {
     "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refresh_token": "bmV3X3JlZnJlc2hfdG9rZW4...",
     "expires_in": 900
   }
 }
 ```
 
-> Backend also sets a new httpOnly cookie with the rotated refresh token.
+> Old refresh token is revoked; both new tokens are returned. Frontend must store the new `refresh_token` for the next rotation.
 
 **Error Responses**
 
-| HTTP | Error                       | Reason                                           |
-|------|-----------------------------|--------------------------------------------------|
-| 401  | `invalid refresh token`     | Token not found, revoked, or hash mismatch       |
-| 401  | `refresh token expired`     | 7 day TTL passed — user must login again         |
+| HTTP | Error                              | Reason                                           |
+|------|------------------------------------|--------------------------------------------------|
+| 400  | `refresh_token is required`        | Request body missing field                       |
+| 401  | `invalid or expired refresh token` | Token not found, revoked, or 7 day TTL passed    |
 
 **Database Operations**
 
 ```
 READ  (Tenant DB)
   auth.session
-    WHERE refresh_token_hash = SHA256(cookie_refresh_token)
+    WHERE refresh_token_hash = SHA256(request_body.refresh_token)
       AND revoked_at         IS NULL
       AND refresh_token_expires_at > now()
   → if not found → 401
@@ -874,23 +850,17 @@ No request body. Access token in header, refresh token from httpOnly cookie.
 {
   "success": true,
   "data": {
-    "message": "logged out successfully"
+    "message": "logged out"
   }
 }
 ```
 
-> Backend sends this header in the **response** to instruct the browser to delete the cookie from its storage.
-> The backend itself never stores cookies — the real revocation happens in the DB (`revoked_at`).
-> ```
-> Set-Cookie: refresh_token=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT
-> ```
-
 **Error Responses**
 
-| HTTP | Error              | Reason                            |
-|------|--------------------|-----------------------------------|
-| 401  | `missing token`    | Authorization header not present  |
-| 401  | `invalid token`    | JWT verification failed           |
+| HTTP | Code             | Error                        | Reason                            |
+|------|------------------|------------------------------|-----------------------------------|
+| 401  | `missing_token`  | `missing or invalid token`   | Authorization header not present  |
+| 500  | `logout_failed`  | `failed to logout`           | Session revocation failed         |
 
 **Database Operations**
 
@@ -899,31 +869,27 @@ UPDATE  (Tenant DB)
   auth.session
     SET revoked_at = now()
     WHERE access_token_hash = SHA256(access_token from header)
-
-INSERT
-  auth.audit_log
-    event_type = 'logout'
-    user_id    = user_id from JWT claims
-    metadata   = { "ip": "...", "user_agent": "..." }
 ```
 
 ---
 
 ## Phase 3 — Tenant Admin Onboarding
 
+> **Status: NOT YET IMPLEMENTED**  
+> The endpoints below (Steps 8–9) are planned but not yet registered in the router.
+> They are included here as a design reference for the upcoming implementation.
+
 > **Who does this:** chain_admin, after logging into the portal.
 > **What it does:** Invite tenant_admins (branch admins) for each branch under their chain.
 >
-> chain_admin can onboard tenant_admins in two ways:
-> - **Individual** — type details for one tenant_admin at a time
-> - **Bulk** — download an Excel template, fill it, upload it back
+> chain_admin onboards tenant_admins by entering details one branch at a time through the form.
 
 ---
 
 ### STEP 8 — Get Branches
 
 Returns all branches under the chain admin's chain.
-Used to pre-fill the Excel template and to populate the branch dropdown for individual entry.
+Used to populate the branch dropdown for individual entry.
 
 ```
 GET /api/v1/chain-admin/branches
@@ -987,50 +953,7 @@ READ  (Tenant DB)
 
 ---
 
-### STEP 9 — Download Excel Template
-
-Downloads an Excel file pre-filled with branch_id and branch_name.
-chain_admin fills in name, email, and mobile for each branch and uploads it back.
-
-```
-GET /api/v1/chain-admin/tenant-admins/template
-```
-
-**Database:** Tenant DB  
-**Auth Required:** Yes — `Authorization: Bearer <access_token>`
-
-**Response**
-
-```
-Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
-Content-Disposition: attachment; filename="tenant_admin_template.xlsx"
-```
-
-**Excel structure**
-
-| branch_id    | branch_name           | name         | email                  | mobile     |
-|--------------|-----------------------|--------------|------------------------|------------|
-| branch-uuid-1 | Velammal - Madurai   | *(fill this)* | *(fill this)*         | *(fill this)* |
-| branch-uuid-2 | Velammal - Coimbatore | *(fill this)* | *(fill this)*        | *(fill this)* |
-
-> - `branch_id` and `branch_name` are pre-filled and locked (read-only cells)
-> - `name`, `email`, `mobile` are left empty for the chain_admin to fill
-> - At least `email` or `mobile` is required per row — both is preferred
-> - If email is not available, mobile is used as fallback for sending the invite
-
-**Database Operations**
-
-```
-READ  (Tenant DB)
-  management.management_table
-    WHERE chain_id = chain_id from JWT claims
-      AND is_active = true
-  → generates one Excel row per branch
-```
-
----
-
-### STEP 10 — Submit Individual Tenant Admin
+### STEP 9 — Submit Tenant Admin
 
 Submits details for a single tenant admin for one branch.
 Validates the data, creates the invite record, and sends the invite email or SMS.
@@ -1100,17 +1023,6 @@ READ  (Tenant DB)
   → if exists → 409 tenant admin already exists
 
 INSERT
-  auth.user
-    role_id            = (SELECT id FROM auth.role WHERE name = 'tenant_admin')
-    management_type_id = (SELECT id FROM auth.management_type WHERE name = 'tenant')
-    management_id      = branch_id
-    name               = submitted name
-    email              = submitted email (nullable)
-    phone              = submitted mobile (nullable)
-    is_active          = true
-    onboarding_channel = 'invite'
-
-INSERT
   auth.invite
     invited_by_user_id = chain_admin user_id from JWT
     management_type_id = 'tenant'
@@ -1133,93 +1045,18 @@ INSERT
     event_type = 'invite_sent'
     user_id    = chain_admin user_id
     metadata   = { "target_role": "tenant_admin", "branch_id": "..." }
+
+NOTE: auth.user is NOT created at this step.
+The tenant admin user row is created only after they accept the invite,
+verify OTP (email + mobile), and set their password.
 ```
 
 ---
 
-### STEP 11 — Bulk Upload via Excel
-
-Accepts the filled Excel template and processes all rows in one request.
-Validates each row, skips invalid ones, creates invite records, and sends invites.
-
-```
-POST /api/v1/chain-admin/tenant-admins/bulk
-```
-
-**Database:** Tenant DB  
-**Auth Required:** Yes — `Authorization: Bearer <access_token>`
-
-**Request**
-
-```
-Content-Type: multipart/form-data
-```
-
-| Field  | Type | Required | Description                            |
-|--------|------|----------|----------------------------------------|
-| `file` | file | Yes      | Filled Excel file (.xlsx only)         |
-
-**Success Response — 200**
-
-```json
-{
-  "success": true,
-  "data": {
-    "total_rows": 5,
-    "success_count": 4,
-    "failed_count": 1,
-    "results": [
-      {
-        "branch_id": "branch-uuid-1",
-        "branch_name": "Velammal - Madurai",
-        "status": "invited",
-        "delivery_channel": "email"
-      },
-      {
-        "branch_id": "branch-uuid-2",
-        "branch_name": "Velammal - Coimbatore",
-        "status": "failed",
-        "reason": "email or mobile is required"
-      }
-    ]
-  }
-}
-```
-
-**Error Responses**
-
-| HTTP | Error                        | Reason                                      |
-|------|------------------------------|---------------------------------------------|
-| 400  | `file is required`           | No file attached                            |
-| 400  | `invalid file format`        | File is not .xlsx                           |
-| 400  | `file is empty`              | No rows found in the sheet                  |
-| 400  | `invalid template format`    | Required columns missing or renamed         |
-
-> **Partial success is allowed.** If 4 out of 5 rows are valid, 4 invites are sent
-> and 1 failure is reported. The entire upload is not rejected for one bad row.
-
-**Database Operations**
-
-```
-For each valid row — same operations as STEP 10 (individual submit):
-  → Validate branch belongs to chain
-  → Check tenant_admin doesn't already exist
-  → INSERT auth.user
-  → INSERT auth.invite
-  → Call external email/SMS service
-  → INSERT auth.audit_log
-
-Invalid rows:
-  → Skipped, reason recorded in response
-  → No DB writes for invalid rows
-```
-
----
-
-### STEP 12 — Send Invite Email (External Service)
+### STEP 10 — Send Invite Email (External Service)
 
 This is not a direct API endpoint. It is an internal call to the external email service
-made by the backend during Steps 10 and 11.
+made by the backend during Step 9.
 
 **External service call**
 
@@ -1263,11 +1100,11 @@ Body:
 ## Updated Token Lifecycle
 
 ```
-Invite token  →  Single use, 48 hour TTL, SHA256 hash in auth.invite
-temp_token    →  Single session, 20 minute TTL, Redis only (JSON)
+Invite token  →  Single use, 48 hour TTL, SHA256 hash in auth.invite. Marked 'accepted' at Step 1.
+temp_token    →  Single session, 20 minute TTL, JSON in Redis. Deleted after Step 4.
 OTP           →  6 digits, 5 minute TTL, max 3 attempts, SHA256 in auth.otp
-access_token  →  JWT, 15 min TTL, stored in localStorage, SHA256 in auth.session
-refresh_token →  Opaque, 7 day TTL, httpOnly cookie, SHA256 in auth.session
+access_token  →  JWT, 15 minute TTL, SHA256 in auth.session (tenant DB)
+refresh_token →  Opaque, 7 day TTL, returned in response body, SHA256 in auth.session, rotated on each use
 ```
 
 ---
@@ -1289,22 +1126,20 @@ Key: `invite_verify:{temp_token}` — JSON, TTL 20 minutes.
 
 ## Complete API Summary
 
-| Step | Method | Endpoint                              | Auth | Description                                      |
-|------|--------|---------------------------------------|------|--------------------------------------------------|
-| 1    | POST   | `/auth/invite/verify`                 | No   | Verify magic link token                          |
-| 2a   | POST   | `/auth/otp/send`                      | No   | Send OTP — `channel: "sms"` (also handles resend)|
-| 3a   | POST   | `/auth/otp/verify`                    | No   | Verify SMS OTP — `channel: "sms"`               |
-| 2b   | POST   | `/auth/otp/send`                      | No   | Send OTP — `channel: "email"` (also handles resend)|
-| 3b   | POST   | `/auth/otp/verify`                    | No   | Verify email OTP — `channel: "email"`           |
-| 4    | POST   | `/auth/invite/set-password`           | No   | Set password, activate account (both channels must be verified) |
-| 5    | POST   | `/auth/login`                         | No   | Login with email + password        |
-| 6    | POST   | `/auth/refresh`                       | No   | Refresh access token               |
-| 7    | POST   | `/auth/logout`                        | Yes  | Logout, revoke session             |
-| 8    | GET    | `/chain-admin/branches`               | Yes  | Get all branches                   |
-| 9    | GET    | `/chain-admin/tenant-admins/template` | Yes  | Download Excel template            |
-| 10   | POST   | `/chain-admin/tenant-admins`          | Yes  | Submit individual tenant admin     |
-| 11   | POST   | `/chain-admin/tenant-admins/bulk`     | Yes  | Bulk upload via Excel              |
+| Step | Method | Endpoint                              | Auth | Status      | Description                                      |
+|------|--------|---------------------------------------|------|-------------|--------------------------------------------------|
+| 1    | POST   | `/auth/invite/verify`                 | No   | ✅ Live     | Verify magic link token                          |
+| 2a   | POST   | `/auth/otp/send`                      | No   | ✅ Live     | Send OTP — `channel: "sms"` (also handles resend)|
+| 3a   | POST   | `/auth/otp/verify`                    | No   | ✅ Live     | Verify SMS OTP — `channel: "sms"`               |
+| 2b   | POST   | `/auth/otp/send`                      | No   | ✅ Live     | Send OTP — `channel: "email"` (also handles resend)|
+| 3b   | POST   | `/auth/otp/verify`                    | No   | ✅ Live     | Verify email OTP — `channel: "email"`           |
+| 4    | POST   | `/auth/invite/set-password`           | No   | ✅ Live     | Set password, activate account (both channels must be verified) |
+| 5    | POST   | `/auth/login`                         | No   | ✅ Live     | Login with email + password                      |
+| 6    | POST   | `/auth/refresh`                       | No   | ✅ Live     | Refresh token pair (body: `{ refresh_token }`)   |
+| 7    | POST   | `/auth/logout`                        | Yes  | ✅ Live     | Logout, revoke session                           |
+| 8    | GET    | `/chain-admin/branches`               | Yes  | 🔲 Planned  | Get all branches                                 |
+| 9    | POST   | `/chain-admin/tenant-admins`          | Yes  | 🔲 Planned  | Submit tenant admin for a branch                 |
 
 ---
 
-*Document version: 2.0 | Module: Chain Admin Onboarding | Status: Draft*
+*Document version: 2.2 | Module: Chain Admin Onboarding | Status: Phase 1 (Steps 1–7) Live — Phase 2 (Steps 8–9) Planned*

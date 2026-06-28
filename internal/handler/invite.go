@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"log"
+
 	"auth-service/internal/service"
 	"auth-service/pkg/response"
 
@@ -29,6 +31,10 @@ func (h *InviteHandler) VerifyToken(c *gin.Context) {
 	var req verifyTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "token is required")
+		return
+	}
+	if c.Request.Method == "OPTIONS" {
+		c.JSON(200, gin.H{})
 		return
 	}
 
@@ -67,12 +73,16 @@ func (h *InviteHandler) VerifyToken(c *gin.Context) {
 func (h *InviteHandler) SetPassword(c *gin.Context) {
 	var req setPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("set-password bind error: %v", err)
 		response.BadRequest(c, err.Error())
 		return
 	}
 
+	log.Printf("set-password request: temp_token=%s password_len=%d", req.TempToken, len(req.Password))
+
 	tokens, err := h.tokenSvc.SetPasswordAndActivate(c.Request.Context(), req.TempToken, req.Password)
 	if err != nil {
+		log.Printf("set-password failed: %v", err)
 		response.BadRequest(c, err.Error())
 		return
 	}

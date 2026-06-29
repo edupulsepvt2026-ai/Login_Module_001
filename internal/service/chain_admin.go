@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"auth-service/internal/model"
@@ -142,6 +143,7 @@ func (s *ChainAdminService) InviteTenantAdmin(
 
 	// Build the magic link sent to the recipient.
 	inviteLink := fmt.Sprintf("%s?token=%s", s.inviteBaseURL, rawToken)
+	log.Printf("[DEV] tenant admin raw invite token: %s", rawToken)
 
 	// Send via email (preferred) or SMS (fallback).
 	deliveryChannel, err := s.sendInviteNotification(ctx, req, branch, inviteLink)

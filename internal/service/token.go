@@ -10,6 +10,7 @@ import (
 	"auth-service/internal/repository"
 	"auth-service/pkg/crypto"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -63,37 +64,74 @@ func (s *TokenService) SetPasswordAndActivate(ctx context.Context, tempToken, pa
 		return nil, fmt.Errorf("failed to process password")
 	}
 
-	// Load master user record to get chain_id, name, email, phone
+	if session.Role == "tenant_admin" {
+		return s.activateTenantAdmin(ctx, redisKey, session, passwordHash)
+	}
+	return s.activateChainAdmin(ctx, redisKey, session, passwordHash)
+}
+
+func (s *TokenService) activateChainAdmin(ctx context.Context, redisKey string, session *inviteSession, passwordHash string) (*TokenPair, error) {
 	mgmtUser, err := s.userRepo.GetByID(ctx, session.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("user not found")
 	}
 	chainID := mgmtUser.ChainID.String()
-	log.Printf("set-password: user_id=%s chain_id=%s", session.UserID, chainID)
+	log.Printf("set-password (chain_admin): user_id=%s chain_id=%s", session.UserID, chainID)
 
-	// Connect to this chain's tenant DB
 	tenantPool, err := s.tenantMgr.GetOrLoad(ctx, chainID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to school database: %w", err)
 	}
 
-	// INSERT into tenant DB — this is where the chain admin's login credentials live
 	if err := s.tenantUserRepo.Create(ctx, tenantPool, session.UserID, chainID,
 		mgmtUser.Email, mgmtUser.Phone, mgmtUser.Name, passwordHash); err != nil {
 		return nil, fmt.Errorf("failed to create user account: %w", err)
 	}
-	log.Printf("set-password: tenant user created user_id=%s", session.UserID)
 
-	// INSERT into master DB — enables login routing (email → chain_id → tenant DB)
-	if err := s.chainMapRepo.Create(ctx, session.UserID, chainID, mgmtUser.Email, mgmtUser.Phone); err != nil {
+	if err := s.chainMapRepo.Create(ctx, session.UserID, "chain_admin", chainID, mgmtUser.Email, mgmtUser.Phone); err != nil {
 		return nil, fmt.Errorf("failed to create identity mapping: %w", err)
 	}
-	log.Printf("set-password: chain mapping created user_id=%s chain_id=%s", session.UserID, chainID)
+	log.Printf("set-password (chain_admin): activated user_id=%s", session.UserID)
 
-	// Clean up the Redis session now that account is fully activated
 	s.redis.Del(ctx, redisKey)
 
-	// Ensure the tenant pool is available in the context for session persistence
 	ctx = context.WithValue(ctx, middleware.TenantDBContextKey, tenantPool)
 	return s.sessionSvc.CreateSession(ctx, mgmtUser)
+}
+
+func (s *TokenService) activateTenantAdmin(ctx context.Context, redisKey string, session *inviteSession, passwordHash string) (*TokenPair, error) {
+	chainID := session.ChainID
+	branchID := session.BranchID
+
+	tenantPool, err := s.tenantMgr.GetOrLoad(ctx, chainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to school database: %w", err)
+	}
+
+	newUserID := uuid.New().String()
+
+	var emailPtr, phonePtr *string
+	if session.Email != "" {
+		e := session.Email
+		emailPtr = &e
+	}
+	if session.Phone != "" {
+		p := session.Phone
+		phonePtr = &p
+	}
+
+	if err := s.tenantUserRepo.CreateTenantAdmin(ctx, tenantPool, newUserID, branchID,
+		emailPtr, phonePtr, session.Name, passwordHash); err != nil {
+		return nil, fmt.Errorf("failed to create tenant admin account: %w", err)
+	}
+
+	if err := s.chainMapRepo.Create(ctx, newUserID, "tenant_admin", chainID, emailPtr, phonePtr); err != nil {
+		return nil, fmt.Errorf("failed to create identity mapping: %w", err)
+	}
+	log.Printf("set-password (tenant_admin): activated user_id=%s chain_id=%s branch_id=%s", newUserID, chainID, branchID)
+
+	s.redis.Del(ctx, redisKey)
+
+	ctx = context.WithValue(ctx, middleware.TenantDBContextKey, tenantPool)
+	return s.sessionSvc.CreateSessionForTenantUser(ctx, newUserID, chainID, branchID)
 }

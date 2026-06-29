@@ -53,17 +53,19 @@ func main() {
 	tenantUserRepo := repository.NewTenantUserRepository()
 	chainMapRepo := repository.NewChainMappingRepository(masterDB)
 	chainAdminRepo := repository.NewChainAdminRepository()
+	tenantInviteRepo := repository.NewTenantInviteRepository()
 
 	// Notify
 	notifier := notify.NewClient(cfg.OmnichannelURL)
 
 	// Services
-	sessionSvc := service.NewSessionService(sessionRepo, userRepo, jwtManager)
+	sessionSvc := service.NewSessionService(sessionRepo, userRepo, chainMapRepo, tenantUserRepo, tenantMgr, jwtManager)
 	inviteSvc := service.NewInviteService(inviteRepo, userRepo, rdb)
 	otpSvc := service.NewOTPService(otpRepo, rdb, notifier)
 	tokenSvc := service.NewTokenService(userRepo, tenantUserRepo, chainMapRepo, sessionSvc, rdb, tenantMgr)
 	loginSvc := service.NewLoginService(chainMapRepo, tenantUserRepo, tenantMgr, sessionSvc)
 	chainAdminSvc := service.NewChainAdminService(chainAdminRepo, notifier, cfg.InviteBaseURL)
+	tenantInviteSvc := service.NewTenantInviteService(tenantInviteRepo, tenantMgr, rdb)
 
 	// Handlers
 	inviteHandler := handler.NewInviteHandler(inviteSvc, tokenSvc)
@@ -72,6 +74,7 @@ func main() {
 	refreshHandler := handler.NewRefreshHandler(sessionSvc)
 	logoutHandler := handler.NewLogoutHandler(sessionSvc)
 	chainAdminHandler := handler.NewChainAdminHandler(chainAdminSvc)
+	tenantInviteHandler := handler.NewTenantInviteHandler(tenantInviteSvc)
 
 	r := gin.Default()
 
@@ -83,6 +86,11 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
+
+	tenantPublic := r.Group("/tenant-auth")
+	{
+		tenantPublic.POST("/invite/verify", tenantInviteHandler.VerifyInviteToken)
+	}
 
 	public := r.Group("/auth")
 	{

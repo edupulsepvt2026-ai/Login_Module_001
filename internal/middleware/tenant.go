@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"auth-service/db"
 
@@ -45,6 +46,7 @@ func TenantDBMiddleware(tenantMgr *db.TenantPoolManager) gin.HandlerFunc {
 		}
 
 		if mid == "" {
+			log.Printf("[TenantDB] rejected: no chain_id found in headers or JWT context — %s %s", c.Request.Method, c.Request.URL.Path)
 			c.JSON(400, gin.H{
 				"error": fmt.Sprintf("missing required header: %s, %s, or %s", TenantMIDHeaderKey, TenantMIDAltHeaderKey, TenantChainIDHeaderKey),
 			})
@@ -52,16 +54,21 @@ func TenantDBMiddleware(tenantMgr *db.TenantPoolManager) gin.HandlerFunc {
 			return
 		}
 
+		log.Printf("[TenantDB] loading pool for chain_id=%s — %s %s", mid, c.Request.Method, c.Request.URL.Path)
+
 		// Get or load tenant DB pool
 		ctx := c.Request.Context()
 		tenantPool, err := tenantMgr.GetOrLoad(ctx, mid)
 		if err != nil {
+			log.Printf("[TenantDB] rejected: failed to load pool for chain_id=%s — %v", mid, err)
 			c.JSON(500, gin.H{
 				"error": fmt.Sprintf("failed to load tenant database for mid %q: %v", mid, err),
 			})
 			c.Abort()
 			return
 		}
+
+		log.Printf("[TenantDB] pool ready: chain_id=%s — %s %s", mid, c.Request.Method, c.Request.URL.Path)
 
 		// Store in context for handler access
 		c.Set(TenantIDContextKey, mid)

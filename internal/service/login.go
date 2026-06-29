@@ -59,7 +59,19 @@ func (s *LoginService) Login(ctx context.Context, email, password string) (*Toke
 		return nil, fmt.Errorf("invalid  password")
 	}
 	log.Printf("password verified for user: %s", tenantUser.ID)
-	// Build a ManagementUser with the IDs needed for JWT claims and session creation
+	ctx = context.WithValue(ctx, middleware.TenantDBContextKey, tenantPool)
+
+	if mapping.Role == "tenant_admin" {
+		log.Printf("login: tenant_admin user_id=%s branch_id=%s", mapping.UserID, tenantUser.ManagementID.String())
+		return s.sessionSvc.CreateSessionForTenantUser(
+			ctx,
+			tenantUser.ID.String(),
+			tenantUser.ChainID.String(),
+			tenantUser.ManagementID.String(),
+		)
+	}
+
+	// chain_admin path
 	userID, err := uuid.Parse(mapping.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid email or password")
@@ -68,13 +80,6 @@ func (s *LoginService) Login(ctx context.Context, email, password string) (*Toke
 	if err != nil {
 		return nil, fmt.Errorf("invalid email or password")
 	}
-
-	mgmtUser := &model.ManagementUser{
-		ID:      userID,
-		ChainID: chainID,
-	}
-
-	// Ensure the tenant pool is available in the context for session persistence
-	ctx = context.WithValue(ctx, middleware.TenantDBContextKey, tenantPool)
+	mgmtUser := &model.ManagementUser{ID: userID, ChainID: chainID}
 	return s.sessionSvc.CreateSession(ctx, mgmtUser)
 }

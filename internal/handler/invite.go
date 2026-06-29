@@ -29,6 +29,8 @@ type setPasswordRequest struct {
 
 func (h *InviteHandler) VerifyToken(c *gin.Context) {
 	var req verifyTokenRequest
+	log.Printf("verify-token request: token=%s", req.Token)
+
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "token is required")
 		return

@@ -14,8 +14,13 @@
     { "key": "password",      "value": "Test@1234" },
     { "key": "access_token",  "value": "" },
     { "key": "refresh_token", "value": "" },
-    { "key": "chain_id",      "value": "bbbbbbbb-0001-4000-8000-000000000001" },
-    { "key": "branch_id",     "value": "dddddddd-0001-4000-8000-000000000001" }
+    { "key": "chain_id",           "value": "bbbbbbbb-0001-4000-8000-000000000001" },
+    { "key": "branch_id",          "value": "dddddddd-0001-4000-8000-000000000001" },
+    { "key": "tenant_invite_token",  "value": "" },
+    { "key": "tenant_email",         "value": "priya@velammal-madurai.edu.in" },
+    { "key": "tenant_password",      "value": "Test@1234" },
+    { "key": "tenant_access_token",  "value": "" },
+    { "key": "tenant_refresh_token", "value": "" }
   ],
   "item": [
     {
@@ -278,6 +283,230 @@
               "path": ["chain-admin", "tenant-admins"]
             },
             "description": "Creates a tenant_admin user for the given branch and sends an invite link.\nbranch_id = tenant_id from management.management_table (returned by Step 8).\nAt least email or mobile is required — email is preferred for delivery.\nReturns invite_id, delivery_channel, and confirmation message."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Phase 4 — Tenant Admin Account Activation",
+      "item": [
+        {
+          "name": "Step 1 — Tenant Invite Verify",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data.temp_token) {",
+                  "    pm.collectionVariables.set('temp_token', res.data.temp_token);",
+                  "    console.log('temp_token saved:', res.data.temp_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{tenant_invite_token}}\",\n  \"chain_id\": \"{{chain_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/tenant-auth/invite/verify",
+              "host": ["{{base_url}}"],
+              "path": ["tenant-auth", "invite", "verify"]
+            },
+            "description": "Verifies the invite link sent to the tenant admin.\nRequires both token (from email link) and chain_id (from URL query param).\nLooks up auth.invite in the Tenant DB (not Master DB).\nReturns temp_token, masked user info, branch details, and chain info."
+          }
+        },
+        {
+          "name": "Step 2a — OTP Send (SMS)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"channel\": \"sms\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/otp/send",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "otp", "send"]
+            },
+            "description": "Reuses the same OTP endpoint as chain admin.\nSends OTP to the tenant admin's registered phone number."
+          }
+        },
+        {
+          "name": "Step 3a — OTP Verify (SMS)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"channel\": \"sms\",\n  \"otp\": \"{{otp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/otp/verify",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "otp", "verify"]
+            },
+            "description": "Reuses the same OTP verify endpoint as chain admin.\nSets sms_verified = true in the Redis session."
+          }
+        },
+        {
+          "name": "Step 2b — OTP Send (Email)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"channel\": \"email\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/otp/send",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "otp", "send"]
+            },
+            "description": "Sends OTP to the tenant admin's registered email address."
+          }
+        },
+        {
+          "name": "Step 3b — OTP Verify (Email)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"channel\": \"email\",\n  \"otp\": \"{{otp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/otp/verify",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "otp", "verify"]
+            },
+            "description": "Sets email_verified = true in the Redis session.\nBoth SMS and email must be verified before set-password."
+          }
+        },
+        {
+          "name": "Step 4 — Set Password (Tenant Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data) {",
+                  "    pm.collectionVariables.set('access_token',  res.data.access_token);",
+                  "    pm.collectionVariables.set('refresh_token', res.data.refresh_token);",
+                  "    console.log('tenant admin tokens saved');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/invite/set-password",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "invite", "set-password"]
+            },
+            "description": "Reuses the same set-password endpoint as chain admin.\nThe service detects role=tenant_admin from the Redis session and:\n  - Creates auth.user in Tenant DB with role=tenant_admin\n  - Creates auth.chain_user_mapping in Master DB for login routing\n  - Issues JWT with management_type=tenant, management_id=branch_id\nReturns access_token + refresh_token."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Phase 5 — Tenant Admin Auth (Login / Refresh / Logout)",
+      "item": [
+        {
+          "name": "Login (Tenant Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data) {",
+                  "    pm.collectionVariables.set('tenant_access_token',  res.data.access_token);",
+                  "    pm.collectionVariables.set('tenant_refresh_token', res.data.refresh_token);",
+                  "    console.log('tenant admin tokens saved after login');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{tenant_email}}\",\n  \"password\": \"{{tenant_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Same endpoint as chain admin login.\nLooks up auth.chain_user_mapping by email — role=tenant_admin row is found.\nVerifies password from Tenant DB auth.user.\nIssues JWT with role=tenant_admin, management_type=tenant, management_id=branch_id.\nReturns access_token + refresh_token saved to tenant_access_token / tenant_refresh_token variables."
+          }
+        },
+        {
+          "name": "Refresh Token (Tenant Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data) {",
+                  "    pm.collectionVariables.set('tenant_access_token',  res.data.access_token);",
+                  "    pm.collectionVariables.set('tenant_refresh_token', res.data.refresh_token);",
+                  "    console.log('tenant admin tokens rotated');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "chain_id",     "value": "{{chain_id}}", "description": "Required — TenantDB middleware uses this to load the correct DB pool." }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{tenant_refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "refresh"]
+            },
+            "description": "Same endpoint as chain admin refresh.\nFinds old session by refresh hash → looks up chain_user_mapping by user_id to get role=tenant_admin.\nRevokes old session, loads Tenant DB, fetches branch_id from auth.user.\nIssues new JWT with tenant_admin claims. Both tokens are rotated."
+          }
+        },
+        {
+          "name": "Logout (Tenant Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type",  "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{tenant_access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "logout"]
+            },
+            "description": "Same endpoint as chain admin logout.\nRevokes the session by access token hash — no role-specific logic needed.\nchain_id is extracted from JWT claims automatically."
           }
         }
       ]

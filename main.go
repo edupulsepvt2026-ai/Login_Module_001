@@ -54,6 +54,7 @@ func main() {
 	chainMapRepo := repository.NewChainMappingRepository(masterDB)
 	chainAdminRepo := repository.NewChainAdminRepository()
 	tenantInviteRepo := repository.NewTenantInviteRepository()
+	teacherInviteRepo := repository.NewTeacherInviteRepository()
 
 	// Notify
 	notifier := notify.NewClient(cfg.OmnichannelURL)
@@ -66,6 +67,7 @@ func main() {
 	loginSvc := service.NewLoginService(chainMapRepo, tenantUserRepo, tenantMgr, sessionSvc)
 	chainAdminSvc := service.NewChainAdminService(chainAdminRepo, notifier, cfg.InviteBaseURL)
 	tenantInviteSvc := service.NewTenantInviteService(tenantInviteRepo, tenantMgr, rdb)
+	teacherInviteSvc := service.NewTeacherInviteService(teacherInviteRepo, notifier, cfg.TeacherInviteBaseURL)
 
 	// Handlers
 	inviteHandler := handler.NewInviteHandler(inviteSvc, tokenSvc)
@@ -75,6 +77,7 @@ func main() {
 	logoutHandler := handler.NewLogoutHandler(sessionSvc)
 	chainAdminHandler := handler.NewChainAdminHandler(chainAdminSvc)
 	tenantInviteHandler := handler.NewTenantInviteHandler(tenantInviteSvc)
+	teacherInviteHandler := handler.NewTeacherInviteHandler(teacherInviteSvc)
 
 	r := gin.Default()
 
@@ -111,6 +114,13 @@ func main() {
 	{
 		chainAdmin.GET("/branches", chainAdminHandler.GetBranches)
 		chainAdmin.POST("/tenant-admins", chainAdminHandler.InviteTenantAdmin)
+	}
+
+	tenantProtected := r.Group("/tenant", middleware.JWTMiddleware(jwtManager), middleware.TenantDBMiddleware(tenantMgr))
+	{
+		tenantProtected.GET("/teachers/template", teacherInviteHandler.DownloadTemplate)
+		tenantProtected.POST("/teachers/invite", teacherInviteHandler.InviteSingle)
+		tenantProtected.POST("/teachers/bulk-invite", teacherInviteHandler.BulkInvite)
 	}
 
 	addr := fmt.Sprintf(":%s", cfg.Port)

@@ -20,7 +20,8 @@
     { "key": "tenant_email",         "value": "priya@velammal-madurai.edu.in" },
     { "key": "tenant_password",      "value": "Test@1234" },
     { "key": "tenant_access_token",  "value": "" },
-    { "key": "tenant_refresh_token", "value": "" }
+    { "key": "tenant_refresh_token", "value": "" },
+    { "key": "teacher_invite_id",    "value": "" }
   ],
   "item": [
     {
@@ -507,6 +508,116 @@
               "path": ["auth", "logout"]
             },
             "description": "Same endpoint as chain admin logout.\nRevokes the session by access token hash — no role-specific logic needed.\nchain_id is extracted from JWT claims automatically."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Phase 6 — Teacher Onboarding (Tenant Admin)",
+      "item": [
+        {
+          "name": "Download Invite Template (Excel)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{tenant_access_token}}" },
+              { "key": "chain_id",      "value": "{{chain_id}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tenant/teachers/template",
+              "host": ["{{base_url}}"],
+              "path": ["tenant", "teachers", "template"]
+            },
+            "description": "Downloads a pre-formatted Excel (.xlsx) template for bulk teacher invites.\nThe file has a header row (name, email, phone) and one sample row.\nFill it in and upload via the Bulk Invite endpoint.\nRequires tenant_admin JWT + chain_id header."
+          }
+        },
+        {
+          "name": "Invite Single Teacher",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data.invite_id) {",
+                  "    pm.collectionVariables.set('teacher_invite_id', res.data.invite_id);",
+                  "    console.log('teacher invite_id saved:', res.data.invite_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type",  "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{tenant_access_token}}" },
+              { "key": "chain_id",      "value": "{{chain_id}}", "description": "Required — TenantDB middleware uses this to load the correct DB pool." }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Anand Krishnan\",\n  \"email\": \"anand.k@velammal-madurai.edu.in\",\n  \"phone\": \"+919876500001\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/tenant/teachers/invite",
+              "host": ["{{base_url}}"],
+              "path": ["tenant", "teachers", "invite"]
+            },
+            "description": "Invites a single teacher by filling in the form manually.\nRequires tenant_admin JWT — branch_id is taken from the token's management_id claim.\nAt least email or phone is required; email is preferred for delivery.\nReturns invite_id, delivery_channel, and a confirmation message.\nThe teacher receives an activation link valid for 48 hours."
+          }
+        },
+        {
+          "name": "Bulk Invite Teachers (CSV)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{tenant_access_token}}" },
+              { "key": "chain_id",      "value": "{{chain_id}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "CSV file with header row: name,email,phone — attach your .csv file here"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/tenant/teachers/bulk-invite",
+              "host": ["{{base_url}}"],
+              "path": ["tenant", "teachers", "bulk-invite"]
+            },
+            "description": "Upload a CSV file to bulk-invite teachers.\nExpected CSV format (first row is header):\n  name,email,phone\n  Anand Krishnan,anand.k@school.edu.in,+919876500001\n  Meena Sundaram,meena.s@school.edu.in,\n\nRules:\n- name is required; email or phone is required per row\n- Rows with missing name are skipped silently\n- Each invite is processed independently — failures don't block others\n\nReturns: total, sent_count, failed_count with per-row details."
+          }
+        },
+        {
+          "name": "Bulk Invite Teachers (Excel)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{tenant_access_token}}" },
+              { "key": "chain_id",      "value": "{{chain_id}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "Excel file (.xlsx) with header row on first sheet: name, email, phone — attach your .xlsx file here"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/tenant/teachers/bulk-invite",
+              "host": ["{{base_url}}"],
+              "path": ["tenant", "teachers", "bulk-invite"]
+            },
+            "description": "Upload an Excel (.xlsx) file to bulk-invite teachers.\nFirst sheet is used. First row must be a header: name, email, phone\nColumn order does not matter — header names are matched by value.\n\nReturns: total, sent_count, failed_count with per-row error details."
           }
         }
       ]

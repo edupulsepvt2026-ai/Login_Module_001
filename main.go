@@ -57,6 +57,7 @@ func main() {
 	teacherInviteRepo := repository.NewTeacherInviteRepository()
 	teacherAuthRepo := repository.NewTeacherAuthRepository()
 	parentInviteRepo := repository.NewParentInviteRepository()
+	parentAuthRepo := repository.NewParentAuthRepository()
 
 	// Notify
 	notifier := notify.NewClient(cfg.OmnichannelURL)
@@ -72,6 +73,7 @@ func main() {
 	teacherInviteSvc := service.NewTeacherInviteService(teacherInviteRepo, notifier, cfg.TeacherInviteBaseURL)
 	teacherAuthSvc := service.NewTeacherAuthService(teacherAuthRepo, tenantInviteRepo, tenantMgr, rdb)
 	parentInviteSvc := service.NewParentInviteService(parentInviteRepo, notifier, cfg.ParentInviteBaseURL)
+	parentAuthSvc := service.NewParentAuthService(parentAuthRepo, tenantInviteRepo, tenantMgr, rdb)
 
 	// Handlers
 	inviteHandler := handler.NewInviteHandler(inviteSvc, tokenSvc)
@@ -84,6 +86,7 @@ func main() {
 	teacherInviteHandler := handler.NewTeacherInviteHandler(teacherInviteSvc)
 	teacherAuthHandler := handler.NewTeacherAuthHandler(teacherAuthSvc)
 	parentInviteHandler := handler.NewParentInviteHandler(parentInviteSvc, cfg)
+	parentAuthHandler := handler.NewParentAuthHandler(parentAuthSvc)
 
 	r := gin.Default()
 
@@ -106,6 +109,11 @@ func main() {
 		teacherPublic.POST("/invite/verify", teacherAuthHandler.VerifyInviteToken)
 		teacherPublic.GET("/onboarding-options", teacherAuthHandler.GetOnboardingOptions)
 		teacherPublic.POST("/profile", teacherAuthHandler.SubmitProfile)
+	}
+
+	parentPublic := r.Group("/parent-auth")
+	{
+		parentPublic.POST("/invite/verify", parentAuthHandler.VerifyInviteToken)
 	}
 
 	public := r.Group("/auth")

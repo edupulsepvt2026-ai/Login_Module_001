@@ -39,6 +39,10 @@ type inviteSession struct {
 	SubjectIDs      []string                 `json:"subject_ids,omitempty"`
 	LanguageIDs     []string                 `json:"language_ids,omitempty"`
 	ClassSections   []model.ClassSectionPair `json:"class_sections,omitempty"`
+
+	// parent only — set by Step 1 (invite verify), empty for every other role.
+	// One invite covers exactly one student — see docs/API_V4.0_PARENT_ONBOARDING.md.
+	StudentID string `json:"student_id,omitempty"`
 }
 
 func loadSession(ctx context.Context, rdb *redis.Client, key string) (*inviteSession, error) {

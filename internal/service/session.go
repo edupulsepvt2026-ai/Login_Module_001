@@ -80,10 +80,10 @@ func (s *SessionService) CreateSession(ctx context.Context, user *model.Manageme
 	}, nil
 }
 
-func (s *SessionService) CreateSessionForTenantUser(ctx context.Context, userID, chainID, branchID string) (*TokenPair, error) {
+func (s *SessionService) CreateSessionForTenantUser(ctx context.Context, userID, chainID, branchID, role string) (*TokenPair, error) {
 	accessToken, err := s.jwtManager.SignAccessToken(pkgjwt.Claims{
 		UserID:         userID,
-		Role:           "tenant_admin",
+		Role:           role,
 		ManagementType: "tenant",
 		ManagementID:   branchID,
 		ChainID:        chainID,
@@ -133,7 +133,7 @@ func (s *SessionService) RefreshSession(ctx context.Context, rawRefreshToken str
 		return nil, fmt.Errorf("failed to rotate session")
 	}
 
-	if mapping.Role == "tenant_admin" {
+	if mapping.Role == "tenant_admin" || mapping.Role == "teacher" {
 		tenantPool, err := s.tenantMgr.GetOrLoad(ctx, mapping.ChainID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to school database")
@@ -143,7 +143,7 @@ func (s *SessionService) RefreshSession(ctx context.Context, rawRefreshToken str
 			return nil, fmt.Errorf("user not found")
 		}
 		ctx = context.WithValue(ctx, middleware.TenantDBContextKey, tenantPool)
-		return s.CreateSessionForTenantUser(ctx, userID, mapping.ChainID, tenantUser.ManagementID.String())
+		return s.CreateSessionForTenantUser(ctx, userID, mapping.ChainID, tenantUser.ManagementID.String(), mapping.Role)
 	}
 
 	user, err := s.userRepo.GetByID(ctx, userID)

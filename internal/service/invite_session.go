@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"auth-service/internal/model"
+
 	"github.com/redis/go-redis/v9"
 )
 
@@ -26,6 +28,17 @@ type inviteSession struct {
 	Name     string `json:"name,omitempty"`
 	ChainID  string `json:"chain_id,omitempty"`
 	BranchID string `json:"branch_id,omitempty"`
+
+	// teacher only — set by Step 5 (profile submission), empty for every other role
+	ProfileComplete bool                     `json:"profile_complete,omitempty"`
+	Address         string                   `json:"address,omitempty"`
+	AlternateMobile string                   `json:"alternate_mobile,omitempty"`
+	PincodeID       string                   `json:"pincode_id,omitempty"`
+	GenderID        string                   `json:"gender_id,omitempty"`
+	QualificationID string                   `json:"qualification_id,omitempty"`
+	SubjectIDs      []string                 `json:"subject_ids,omitempty"`
+	LanguageIDs     []string                 `json:"language_ids,omitempty"`
+	ClassSections   []model.ClassSectionPair `json:"class_sections,omitempty"`
 }
 
 func loadSession(ctx context.Context, rdb *redis.Client, key string) (*inviteSession, error) {

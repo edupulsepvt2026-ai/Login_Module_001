@@ -55,6 +55,7 @@ func main() {
 	chainAdminRepo := repository.NewChainAdminRepository()
 	tenantInviteRepo := repository.NewTenantInviteRepository()
 	teacherInviteRepo := repository.NewTeacherInviteRepository()
+	teacherAuthRepo := repository.NewTeacherAuthRepository()
 
 	// Notify
 	notifier := notify.NewClient(cfg.OmnichannelURL)
@@ -63,11 +64,12 @@ func main() {
 	sessionSvc := service.NewSessionService(sessionRepo, userRepo, chainMapRepo, tenantUserRepo, tenantMgr, jwtManager)
 	inviteSvc := service.NewInviteService(inviteRepo, userRepo, rdb)
 	otpSvc := service.NewOTPService(otpRepo, rdb, notifier)
-	tokenSvc := service.NewTokenService(userRepo, tenantUserRepo, chainMapRepo, sessionSvc, rdb, tenantMgr)
+	tokenSvc := service.NewTokenService(userRepo, tenantUserRepo, chainMapRepo, teacherAuthRepo, sessionSvc, rdb, tenantMgr)
 	loginSvc := service.NewLoginService(chainMapRepo, tenantUserRepo, tenantMgr, sessionSvc)
 	chainAdminSvc := service.NewChainAdminService(chainAdminRepo, notifier, cfg.InviteBaseURL)
 	tenantInviteSvc := service.NewTenantInviteService(tenantInviteRepo, tenantMgr, rdb)
 	teacherInviteSvc := service.NewTeacherInviteService(teacherInviteRepo, notifier, cfg.TeacherInviteBaseURL)
+	teacherAuthSvc := service.NewTeacherAuthService(teacherAuthRepo, tenantInviteRepo, tenantMgr, rdb)
 
 	// Handlers
 	inviteHandler := handler.NewInviteHandler(inviteSvc, tokenSvc)
@@ -78,6 +80,7 @@ func main() {
 	chainAdminHandler := handler.NewChainAdminHandler(chainAdminSvc)
 	tenantInviteHandler := handler.NewTenantInviteHandler(tenantInviteSvc)
 	teacherInviteHandler := handler.NewTeacherInviteHandler(teacherInviteSvc)
+	teacherAuthHandler := handler.NewTeacherAuthHandler(teacherAuthSvc)
 
 	r := gin.Default()
 
@@ -93,6 +96,13 @@ func main() {
 	tenantPublic := r.Group("/tenant-auth")
 	{
 		tenantPublic.POST("/invite/verify", tenantInviteHandler.VerifyInviteToken)
+	}
+
+	teacherPublic := r.Group("/teacher-auth")
+	{
+		teacherPublic.POST("/invite/verify", teacherAuthHandler.VerifyInviteToken)
+		teacherPublic.GET("/onboarding-options", teacherAuthHandler.GetOnboardingOptions)
+		teacherPublic.POST("/profile", teacherAuthHandler.SubmitProfile)
 	}
 
 	public := r.Group("/auth")

@@ -1,0 +1,403 @@
+{
+  "info": {
+    "name": "Teacher Onboarding API Collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0",
+    "description": "EduPulse auth-service — Teacher Onboarding (docs/API_V3.0_TEACHER_ONBOARDING.md).\nCovers Phase 2 (account activation: invite verify -> OTP -> onboarding-options -> profile -> set-password) and Phase 3 (login/refresh/logout), plus a prerequisite folder to create a teacher invite.\n\nBefore running:\n1. OTP codes are never returned by the API (by design). To read them locally, either point OMNICHANNEL_URL at a real service, or run a throwaway local listener on port 8009 that logs the POST body of /api/v1/notify — the OTP is in the message text. Paste the code into {{otp}} before each OTP Verify call.\n2. The raw teacher invite token is also never returned by the API — after 'Invite Single Teacher' below, copy it from the auth-service console log line `[DEV] teacher raw invite token: ...` into {{teacher_invite_token}} before running Step 1.\n3. {{pincode_id}} must be filled in manually (GET /teacher-auth/onboarding-options intentionally omits the ~2000-row pincode table — grab any id via `SELECT id FROM masters.pincodes LIMIT 1;` against the tenant DB).\n4. {{tenant_email}} / {{tenant_password}} must belong to an already-activated tenant_admin for the branch in {{branch_id}} — see the main postman_auth_service_collection.json to create one first if needed."
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8080" },
+    { "key": "chain_id", "value": "bbbbbbbb-0001-4000-8000-000000000001" },
+    { "key": "branch_id", "value": "dddddddd-0001-4000-8000-000000000001" },
+
+    { "key": "tenant_email", "value": "" },
+    { "key": "tenant_password", "value": "" },
+    { "key": "tenant_access_token", "value": "" },
+    { "key": "tenant_refresh_token", "value": "" },
+
+    { "key": "teacher_name", "value": "Anita Sharma" },
+    { "key": "teacher_email", "value": "anita.sharma@velammal-chennai.edu.in" },
+    { "key": "teacher_phone", "value": "+919876500099" },
+    { "key": "teacher_invite_id", "value": "" },
+    { "key": "teacher_invite_token", "value": "" },
+
+    { "key": "temp_token", "value": "" },
+    { "key": "otp", "value": "" },
+
+    { "key": "pincode_id", "value": "" },
+    { "key": "gender_id", "value": "" },
+    { "key": "qualification_id", "value": "" },
+    { "key": "subject_id_1", "value": "" },
+    { "key": "subject_id_2", "value": "" },
+    { "key": "language_id_1", "value": "" },
+    { "key": "class_id_1", "value": "" },
+    { "key": "section_id_1", "value": "" },
+
+    { "key": "teacher_password", "value": "Test@1234" },
+    { "key": "teacher_access_token", "value": "" },
+    { "key": "teacher_refresh_token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "0 — Prerequisite: Invite a Teacher (Tenant Admin)",
+      "item": [
+        {
+          "name": "Tenant Admin Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data) {",
+                  "    pm.collectionVariables.set('tenant_access_token', res.data.access_token);",
+                  "    pm.collectionVariables.set('tenant_refresh_token', res.data.refresh_token);",
+                  "    console.log('tenant admin token saved');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{tenant_email}}\",\n  \"password\": \"{{tenant_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Needs an already-activated tenant_admin account for {{branch_id}}."
+          }
+        },
+        {
+          "name": "Invite Single Teacher",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data.invite_id) {",
+                  "    pm.collectionVariables.set('teacher_invite_id', res.data.invite_id);",
+                  "    console.log('teacher invite_id saved:', res.data.invite_id);",
+                  "    console.log('Now copy the raw token from the auth-service console log line: [DEV] teacher raw invite token: ... and paste it into the teacher_invite_token variable.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{tenant_access_token}}" },
+              { "key": "chain_id", "value": "{{chain_id}}", "description": "Required — TenantDB middleware uses this to load the correct DB pool." }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{teacher_name}}\",\n  \"email\": \"{{teacher_email}}\",\n  \"phone\": \"{{teacher_phone}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/tenant/teachers/invite",
+              "host": ["{{base_url}}"],
+              "path": ["tenant", "teachers", "invite"]
+            },
+            "description": "Creates auth.invite with target_role='teacher', 48h TTL.\nThe raw token is only ever logged server-side ([DEV] teacher raw invite token: ...) — copy it into {{teacher_invite_token}} before Step 1 below."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Phase 2 — Teacher Account Activation",
+      "item": [
+        {
+          "name": "Step 1 — Invite Verify",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data.temp_token) {",
+                  "    pm.collectionVariables.set('temp_token', res.data.temp_token);",
+                  "    console.log('temp_token saved:', res.data.temp_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{teacher_invite_token}}\",\n  \"chain_id\": \"{{chain_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/teacher-auth/invite/verify",
+              "host": ["{{base_url}}"],
+              "path": ["teacher-auth", "invite", "verify"]
+            },
+            "description": "Step 1. Validates the magic link — rejects a tenant_admin/chain_admin token (target_role filter).\nMarks the invite accepted and opens a 20-minute Redis session.\nReturns temp_token + masked user/branch/chain info."
+          }
+        },
+        {
+          "name": "Step 2a — OTP Send (SMS)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"channel\": \"sms\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/otp/send",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "otp", "send"]
+            },
+            "description": "Reused endpoint — identical behavior for every role."
+          }
+        },
+        {
+          "name": "Step 3a — OTP Verify (SMS)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"channel\": \"sms\",\n  \"otp\": \"{{otp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/otp/verify",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "otp", "verify"]
+            },
+            "description": "Sets sms_verified = true in the Redis session."
+          }
+        },
+        {
+          "name": "Step 2b — OTP Send (Email)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"channel\": \"email\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/otp/send",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "otp", "send"]
+            }
+          }
+        },
+        {
+          "name": "Step 3b — OTP Verify (Email)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"channel\": \"email\",\n  \"otp\": \"{{otp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/otp/verify",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "otp", "verify"]
+            },
+            "description": "Sets email_verified = true. Both channels must be verified before Step 5."
+          }
+        },
+        {
+          "name": "Step 4 — Get Onboarding Options",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data) {",
+                  "    const d = res.data;",
+                  "    if (d.genders && d.genders.length) pm.collectionVariables.set('gender_id', d.genders[0].id);",
+                  "    if (d.qualifications && d.qualifications.length) pm.collectionVariables.set('qualification_id', d.qualifications[0].id);",
+                  "    if (d.subjects && d.subjects.length > 0) pm.collectionVariables.set('subject_id_1', d.subjects[0].id);",
+                  "    if (d.subjects && d.subjects.length > 1) pm.collectionVariables.set('subject_id_2', d.subjects[1].id);",
+                  "    if (d.languages && d.languages.length) pm.collectionVariables.set('language_id_1', d.languages[0].id);",
+                  "    if (d.classes && d.classes.length) {",
+                  "        pm.collectionVariables.set('class_id_1', d.classes[0].id);",
+                  "        if (d.classes[0].sections && d.classes[0].sections.length) {",
+                  "            pm.collectionVariables.set('section_id_1', d.classes[0].sections[0].id);",
+                  "        }",
+                  "    }",
+                  "    console.log('onboarding option ids captured for Step 5');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/teacher-auth/onboarding-options?temp_token={{temp_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["teacher-auth", "onboarding-options"],
+              "query": [{ "key": "temp_token", "value": "{{temp_token}}" }]
+            },
+            "description": "Step 4. Read-only — populates the profile form's dropdowns.\nAuto-captures the first gender/qualification/subject/language/class+section id into collection variables for Step 5.\npincode_id is NOT returned here by design (large lookup table) — fill {{pincode_id}} manually."
+          }
+        },
+        {
+          "name": "Step 5 — Submit Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success) { console.log('profile status:', res.data.status); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"address\": \"12, Gandhi Street, Chennai\",\n  \"alternate_mobile\": \"+919876500098\",\n  \"pincode_id\": \"{{pincode_id}}\",\n  \"gender_id\": \"{{gender_id}}\",\n  \"qualification_id\": \"{{qualification_id}}\",\n  \"subject_ids\": [\"{{subject_id_1}}\", \"{{subject_id_2}}\"],\n  \"language_ids\": [\"{{language_id_1}}\"],\n  \"class_sections\": [\n    { \"class_id\": \"{{class_id_1}}\", \"section_id\": \"{{section_id_1}}\" }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/teacher-auth/profile",
+              "host": ["{{base_url}}"],
+              "path": ["teacher-auth", "profile"]
+            },
+            "description": "Step 5. Requires both OTP channels verified. Validates every masters.* id against the tenant DB — nothing is written to teachers.* yet, only held in the Redis session.\nRequires {{pincode_id}} to be filled in manually (see collection description)."
+          }
+        },
+        {
+          "name": "Step 6 — Set Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data) {",
+                  "    pm.collectionVariables.set('teacher_access_token', res.data.access_token);",
+                  "    pm.collectionVariables.set('teacher_refresh_token', res.data.refresh_token);",
+                  "    console.log('teacher tokens saved');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temp_token\": \"{{temp_token}}\",\n  \"password\": \"{{teacher_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/invite/set-password",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "invite", "set-password"]
+            },
+            "description": "Reused endpoint, now with a third role branch (role=teacher from the Redis session).\nRequires sms_verified, email_verified, AND profile_complete all true.\nCreates auth.user + teachers.teachers + teacher_subjects/teacher_languages/teacher_class_sections + audit_log in one transaction, then a chain_user_mapping row so /auth/login can route this teacher.\nReturns access_token + refresh_token."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Phase 3 — Teacher Login / Refresh / Logout",
+      "item": [
+        {
+          "name": "Login (Teacher)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data) {",
+                  "    pm.collectionVariables.set('teacher_access_token', res.data.access_token);",
+                  "    pm.collectionVariables.set('teacher_refresh_token', res.data.refresh_token);",
+                  "    console.log('teacher tokens saved after login');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{teacher_email}}\",\n  \"password\": \"{{teacher_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Same endpoint as every other role — chain_user_mapping now has a role='teacher' row after Step 6.\nIssues JWT with role=teacher, management_type=tenant, management_id=branch_id."
+          }
+        },
+        {
+          "name": "Refresh Token (Teacher)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data) {",
+                  "    pm.collectionVariables.set('teacher_access_token', res.data.access_token);",
+                  "    pm.collectionVariables.set('teacher_refresh_token', res.data.refresh_token);",
+                  "    console.log('teacher tokens rotated');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "chain_id", "value": "{{chain_id}}", "description": "Required — JWT middleware does not run on this route." }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{teacher_refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "refresh"]
+            }
+          }
+        },
+        {
+          "name": "Logout (Teacher)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{teacher_access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "logout"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

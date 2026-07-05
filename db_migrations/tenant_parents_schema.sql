@@ -17,6 +17,8 @@
 --   4. parents.parent row created, linked via user_id
 --   5. Parent adds student details → parents.student row created
 --   6. Parent submits onboarding application for student admission
+--   7. Once approved, student_enrollment (+ student_subjects) rows
+--      capture the student's actual class/section/subjects per year
 --
 -- Tables:
 --   parent               — Core parent/guardian profile
@@ -28,6 +30,8 @@
 --   emergency_contact    — Emergency contacts listed per student
 --   onboarding_application — Student admission application
 --   application_document — Documents uploaded for an application
+--   student_enrollment   — Student's class/section for a given academic year
+--   student_subjects     — Subjects a student takes for a given enrollment
 --
 -- Cross-schema FKs (within this tenant DB):
 --   parent.user_id                          → auth.user(id)
@@ -44,6 +48,18 @@
 --   emergency_contact.relationship_type_id → masters.relationship_type(id)
 --   onboarding_application.status_id    → masters.onboarding_status(id)
 --   application_document.document_type_id → masters.document_type(id)
+--   student_enrollment.class_id         → masters.classes(id)
+--   student_enrollment.section_id       → masters.sections(id)
+--   student_subjects.subject_id         → masters.subjects(id)
+--
+-- Note on grade_applying_id vs student_enrollment:
+--   masters.grade is year-scoped (name + level + academic_year) and is
+--   used ONLY at admission time — "which year's cohort is this applicant
+--   targeting". student_enrollment is a separate, ongoing fact: it reuses
+--   the same flat masters.classes/masters.sections tables teachers are
+--   assigned against (teachers.teacher_class_sections), with academic_year
+--   living on the enrollment row itself. A promotion is a new
+--   student_enrollment row, not a new masters.classes row.
 -- ================================================================
 
 CREATE SCHEMA IF NOT EXISTS parents;
@@ -270,3 +286,63 @@ COMMENT ON TABLE  parents.application_document IS 'Documents uploaded for an adm
 COMMENT ON COLUMN parents.application_document.document_type_id    IS 'FK to masters.document_type(id). Enforced at app layer.';
 COMMENT ON COLUMN parents.application_document.verified_by_user_id IS 'FK to auth.user(id). School staff who verified the document.';
 COMMENT ON COLUMN parents.application_document.storage_url         IS 'Path or URL in the file storage system (S3, GCS, etc.).';
+
+
+-- ── Student Enrollment ──────────────────────────────────────────
+-- One row per student per academic year — the class/section a student
+-- is actually enrolled in. Distinct from student.grade_applying_id,
+-- which is only the grade an admission application targets, not an
+-- ongoing fact. Reuses masters.classes/masters.sections — the same
+-- flat, non-year-scoped tables teachers.teacher_class_sections uses —
+-- with academic_year living on this fact row instead of on the lookup
+-- tables, so a promotion inserts a new row rather than a new class.
+CREATE TABLE parents.student_enrollment (
+    id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id    UUID         NOT NULL REFERENCES parents.student(id) ON DELETE CASCADE,
+    class_id      UUID         NOT NULL,   -- → masters.classes(id)
+    section_id    UUID         NOT NULL,   -- → masters.sections(id)
+    academic_year VARCHAR(20)  NOT NULL,
+    roll_number   VARCHAR(20),
+    status        VARCHAR(20)  NOT NULL DEFAULT 'active',
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_student_enrollment_year   UNIQUE (student_id, academic_year),
+    CONSTRAINT chk_student_enrollment_status CHECK (
+        status = ANY (ARRAY['active', 'promoted', 'transferred', 'withdrawn'])
+    )
+);
+
+CREATE INDEX idx_student_enrollment_student ON parents.student_enrollment (student_id);
+CREATE INDEX idx_student_enrollment_class   ON parents.student_enrollment (class_id, section_id);
+CREATE INDEX idx_student_enrollment_year    ON parents.student_enrollment (academic_year);
+
+CREATE TRIGGER trg_student_enrollment_updated_at
+    BEFORE UPDATE ON parents.student_enrollment
+    FOR EACH ROW EXECUTE FUNCTION auth.set_updated_at();
+
+COMMENT ON TABLE  parents.student_enrollment IS 'One row per student per academic year — actual class/section enrollment. Distinct from student.grade_applying_id (an admission target, not an ongoing fact).';
+COMMENT ON COLUMN parents.student_enrollment.class_id      IS 'FK to masters.classes(id). Enforced at app layer. Same table teachers.teacher_class_sections uses — not year-scoped.';
+COMMENT ON COLUMN parents.student_enrollment.section_id    IS 'FK to masters.sections(id). Enforced at app layer.';
+COMMENT ON COLUMN parents.student_enrollment.academic_year IS 'e.g. "2026-27". Year lives here, not on masters.classes — a promotion is a new row, not a new class.';
+COMMENT ON COLUMN parents.student_enrollment.status        IS 'active = currently enrolled this year. promoted/transferred/withdrawn close out a row without deleting history.';
+
+
+-- ── Student Subjects ────────────────────────────────────────────
+-- Subjects a student takes for a given enrollment (academic year).
+-- Scoped to the enrollment row rather than student_id directly, since
+-- subject choices can change on promotion (e.g. stream selection
+-- entering Class 11).
+CREATE TABLE parents.student_subjects (
+    id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_enrollment_id UUID        NOT NULL REFERENCES parents.student_enrollment(id) ON DELETE CASCADE,
+    subject_id            UUID        NOT NULL,   -- → masters.subjects(id)
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_student_subject UNIQUE (student_enrollment_id, subject_id)
+);
+
+CREATE INDEX idx_student_subjects_enrollment ON parents.student_subjects (student_enrollment_id);
+
+COMMENT ON TABLE  parents.student_subjects IS 'Subjects a student takes for a given enrollment year. Scoped per-enrollment, not per-student, since subject choices can change on promotion.';
+COMMENT ON COLUMN parents.student_subjects.subject_id IS 'FK to masters.subjects(id). Enforced at app layer.';

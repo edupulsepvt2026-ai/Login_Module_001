@@ -61,13 +61,14 @@ func (s *LoginService) Login(ctx context.Context, email, password string) (*Toke
 	log.Printf("password verified for user: %s", tenantUser.ID)
 	ctx = context.WithValue(ctx, middleware.TenantDBContextKey, tenantPool)
 
-	if mapping.Role == "tenant_admin" {
-		log.Printf("login: tenant_admin user_id=%s branch_id=%s", mapping.UserID, tenantUser.ManagementID.String())
+	if mapping.Role == "tenant_admin" || mapping.Role == "teacher" {
+		log.Printf("login: %s user_id=%s branch_id=%s", mapping.Role, mapping.UserID, tenantUser.ManagementID.String())
 		return s.sessionSvc.CreateSessionForTenantUser(
 			ctx,
 			tenantUser.ID.String(),
 			tenantUser.ChainID.String(),
 			tenantUser.ManagementID.String(),
+			mapping.Role,
 		)
 	}
 

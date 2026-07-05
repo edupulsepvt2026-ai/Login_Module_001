@@ -12,7 +12,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-
 type InviteService struct {
 	inviteRepo *repository.InviteRepository
 	userRepo   *repository.UserRepository
@@ -122,12 +121,18 @@ func maskPhone(phone string) string {
 }
 
 func maskEmail(email string) string {
+	if email == "" {
+		return ""
+	}
 	at := -1
 	for i, c := range email {
 		if c == '@' {
 			at = i
 			break
 		}
+	}
+	if at < 0 {
+		return "****"
 	}
 	if at <= 1 {
 		return "****" + email[at:]

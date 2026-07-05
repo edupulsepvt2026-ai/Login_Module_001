@@ -1,0 +1,182 @@
+{
+  "info": {
+    "name": "Parent Invite API Collection (Phase 4)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0",
+    "description": "EduPulse auth-service — Phase 4 of docs/API_V4.0_PARENT_ONBOARDING.md: teacher-initiated student + parent invite.\nOnly Phase 4 is implemented so far (invite a parent for a student already in the teacher's class). Phase 5 (parent account activation: OTP/profile/set-password) and Phase 6 (login) are not yet built — this collection stops at 'invite sent'.\n\nBefore running:\n1. {{teacher_email}} / {{teacher_password}} must belong to an already-activated teacher account for {{branch_id}} (see postman_teacher_onboarding_collection.json to create one).\n2. {{class_id}}, {{section_id}}, {{relationship_type_id}} must be filled in manually — these endpoints take raw ids, not names (only the bulk CSV/Excel upload accepts human-readable class/grade/relationship_type columns). Grab sample ids with:\n   SELECT id, name FROM masters.classes;\n   SELECT id, name FROM masters.sections;\n   SELECT id, name FROM masters.relationship_type;\n   against the tenant DB.\n3. The raw parent invite token is never returned by the API — after 'Invite Single Parent' below, copy it from the auth-service console log line `[DEV] parent raw invite token: ...` if you need it for a future Phase 5 test."
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8080" },
+    { "key": "chain_id", "value": "bbbbbbbb-0001-4000-8000-000000000001" },
+    { "key": "branch_id", "value": "dddddddd-0001-4000-8000-000000000001" },
+
+    { "key": "teacher_email", "value": "" },
+    { "key": "teacher_password", "value": "" },
+    { "key": "teacher_access_token", "value": "" },
+    { "key": "teacher_refresh_token", "value": "" },
+
+    { "key": "student_name", "value": "Kavin Raj" },
+    { "key": "class_id", "value": "" },
+    { "key": "section_id", "value": "" },
+    { "key": "parent_name", "value": "Suresh Raj" },
+    { "key": "parent_email", "value": "suresh.raj@example.com" },
+    { "key": "parent_mobile", "value": "+919876500011" },
+    { "key": "relationship_type_id", "value": "" },
+
+    { "key": "student_id", "value": "" },
+    { "key": "invite_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "0 — Prerequisite: Teacher Login",
+      "item": [
+        {
+          "name": "Teacher Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data) {",
+                  "    pm.collectionVariables.set('teacher_access_token', res.data.access_token);",
+                  "    pm.collectionVariables.set('teacher_refresh_token', res.data.refresh_token);",
+                  "    console.log('teacher token saved');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{teacher_email}}\",\n  \"password\": \"{{teacher_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Needs an already-activated teacher account for {{branch_id}} (see postman_teacher_onboarding_collection.json)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Phase 4 — Teacher Invites Parent",
+      "item": [
+        {
+          "name": "Download Invite Template (Excel)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{teacher_access_token}}" },
+              { "key": "chain_id", "value": "{{chain_id}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/teacher/parents/template",
+              "host": ["{{base_url}}"],
+              "path": ["teacher", "parents", "template"]
+            },
+            "description": "Downloads a pre-formatted Excel (.xlsx) template for bulk parent invites.\nColumns: student_name, class, grade, parent_name, parent_email, parent_mobile, relationship_type.\n'grade' is the section label (e.g. \"A\") despite the name — see docs/API_V4.0_PARENT_ONBOARDING.md.\nRequires teacher JWT + chain_id header."
+          }
+        },
+        {
+          "name": "Invite Single Parent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data) {",
+                  "    if (res.data.student_id) pm.collectionVariables.set('student_id', res.data.student_id);",
+                  "    if (res.data.invite_id) pm.collectionVariables.set('invite_id', res.data.invite_id);",
+                  "    console.log('status:', res.data.status, '-', res.data.message);",
+                  "    if (res.data.status === 'invited') {",
+                  "        console.log('Now copy the raw token from the auth-service console log line: [DEV] parent raw invite token: ...');",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{teacher_access_token}}" },
+              { "key": "chain_id", "value": "{{chain_id}}", "description": "Required — TenantDB middleware uses this to load the correct DB pool." }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"student_name\": \"{{student_name}}\",\n  \"class_id\": \"{{class_id}}\",\n  \"section_id\": \"{{section_id}}\",\n  \"parent_name\": \"{{parent_name}}\",\n  \"parent_email\": \"{{parent_email}}\",\n  \"parent_mobile\": \"{{parent_mobile}}\",\n  \"relationship_type_id\": \"{{relationship_type_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/teacher/parents/invite",
+              "host": ["{{base_url}}"],
+              "path": ["teacher", "parents", "invite"]
+            },
+            "description": "Creates parents.student + student_enrollment for the given class/section (one invite always covers exactly one student), then either:\n- sends a brand-new invite (status: \"invited\"), or\n- if the parent contact already has an active account (another child already onboarded), links this student directly to it — no invite needed (status: \"linked_to_existing_parent\").\n\nRun this request twice with the same parent_email/parent_mobile but a different student_name (after completing Phase 5 for the first) to see the second case."
+          }
+        },
+        {
+          "name": "Bulk Invite Parents (CSV)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{teacher_access_token}}" },
+              { "key": "chain_id", "value": "{{chain_id}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "CSV file with header row: student_name,class,grade,parent_name,parent_email,parent_mobile,relationship_type — attach your .csv file here"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/teacher/parents/bulk-invite",
+              "host": ["{{base_url}}"],
+              "path": ["teacher", "parents", "bulk-invite"]
+            },
+            "description": "Upload a CSV file to bulk-invite parents. One row = one student = one invite.\nExpected CSV format (first row is header):\n  student_name,class,grade,parent_name,parent_email,parent_mobile,relationship_type\n  Kavin Raj,Class 6,A,Suresh Raj,suresh.raj@example.com,+919876500011,Father\n  Meena Raj,Class 3,B,Suresh Raj,suresh.raj@example.com,+919876500011,Father\n\nclass/grade/relationship_type are resolved by name against masters.classes/masters.sections/masters.relationship_type (case-insensitive) — an unmatched name fails just that row, not the whole upload.\nTwo rows sharing the same parent contact only collapse into one account if the first has already completed Phase 5 activation by the time the second is invited — otherwise each gets its own separate invite/link.\n\nReturns: total, sent_count, failed_count with per-row details."
+          }
+        },
+        {
+          "name": "Bulk Invite Parents (Excel)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{teacher_access_token}}" },
+              { "key": "chain_id", "value": "{{chain_id}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "Excel file (.xlsx) with header row on first sheet: student_name, class, grade, parent_name, parent_email, parent_mobile, relationship_type — attach your .xlsx file here"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/teacher/parents/bulk-invite",
+              "host": ["{{base_url}}"],
+              "path": ["teacher", "parents", "bulk-invite"]
+            },
+            "description": "Upload an Excel (.xlsx) file to bulk-invite parents. First sheet is used, first row must be the header.\nSame name-resolution and sibling-merging behavior as the CSV variant above.\n\nReturns: total, sent_count, failed_count with per-row error details."
+          }
+        }
+      ]
+    }
+  ]
+}

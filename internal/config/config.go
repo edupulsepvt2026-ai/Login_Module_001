@@ -17,10 +17,15 @@ type Config struct {
 	MasterDBUser     string
 	MasterDBPassword string
 
-	OmnichannelURL        string
-	InviteBaseURL         string
-	TeacherInviteBaseURL  string
-	CORSAllowedOrigins    string
+	OmnichannelURL       string
+	InviteBaseURL        string
+	TeacherInviteBaseURL string
+	ParentInviteBaseURL  string
+	CORSAllowedOrigins   string
+
+	// CurrentAcademicYear is used to stamp new parents.student_enrollment
+	// rows (e.g. "2026-27"). Not per-request — a school-wide setting.
+	CurrentAcademicYear string
 
 	RedisAddr     string
 	RedisPassword string
@@ -50,7 +55,10 @@ func Load() *Config {
 		OmnichannelURL:       getEnv("OMNICHANNEL_URL", "http://localhost:8001"),
 		InviteBaseURL:        getEnv("INVITE_BASE_URL", "https://campuscrew.app/invite"),
 		TeacherInviteBaseURL: getEnv("TEACHER_INVITE_BASE_URL", "https://campuscrew.app/teacher-invite"),
+		ParentInviteBaseURL:  getEnv("PARENT_INVITE_BASE_URL", "https://campuscrew.app/parent-invite"),
 		CORSAllowedOrigins:   getEnv("CORS_ALLOWED_ORIGINS", "*"),
+
+		CurrentAcademicYear: getEnv("CURRENT_ACADEMIC_YEAR", "2026-27"),
 
 		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),

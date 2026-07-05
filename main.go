@@ -56,6 +56,7 @@ func main() {
 	tenantInviteRepo := repository.NewTenantInviteRepository()
 	teacherInviteRepo := repository.NewTeacherInviteRepository()
 	teacherAuthRepo := repository.NewTeacherAuthRepository()
+	parentInviteRepo := repository.NewParentInviteRepository()
 
 	// Notify
 	notifier := notify.NewClient(cfg.OmnichannelURL)
@@ -70,6 +71,7 @@ func main() {
 	tenantInviteSvc := service.NewTenantInviteService(tenantInviteRepo, tenantMgr, rdb)
 	teacherInviteSvc := service.NewTeacherInviteService(teacherInviteRepo, notifier, cfg.TeacherInviteBaseURL)
 	teacherAuthSvc := service.NewTeacherAuthService(teacherAuthRepo, tenantInviteRepo, tenantMgr, rdb)
+	parentInviteSvc := service.NewParentInviteService(parentInviteRepo, notifier, cfg.ParentInviteBaseURL)
 
 	// Handlers
 	inviteHandler := handler.NewInviteHandler(inviteSvc, tokenSvc)
@@ -81,6 +83,7 @@ func main() {
 	tenantInviteHandler := handler.NewTenantInviteHandler(tenantInviteSvc)
 	teacherInviteHandler := handler.NewTeacherInviteHandler(teacherInviteSvc)
 	teacherAuthHandler := handler.NewTeacherAuthHandler(teacherAuthSvc)
+	parentInviteHandler := handler.NewParentInviteHandler(parentInviteSvc, cfg)
 
 	r := gin.Default()
 
@@ -131,6 +134,13 @@ func main() {
 		tenantProtected.GET("/teachers/template", teacherInviteHandler.DownloadTemplate)
 		tenantProtected.POST("/teachers/invite", teacherInviteHandler.InviteSingle)
 		tenantProtected.POST("/teachers/bulk-invite", teacherInviteHandler.BulkInvite)
+	}
+
+	teacherProtected := r.Group("/teacher", middleware.JWTMiddleware(jwtManager), middleware.TenantDBMiddleware(tenantMgr))
+	{
+		teacherProtected.GET("/parents/template", parentInviteHandler.DownloadTemplate)
+		teacherProtected.POST("/parents/invite", parentInviteHandler.InviteSingle)
+		teacherProtected.POST("/parents/bulk-invite", parentInviteHandler.BulkInvite)
 	}
 
 	addr := fmt.Sprintf(":%s", cfg.Port)

@@ -10,7 +10,7 @@
 --   are NOT duplicated here — they live in auth.user and are
 --   fetched via the user_id FK join.
 --
--- Account creation flow:
+-- Account creation flow (self-service admission — student not yet enrolled):
 --   1. Parent receives invite (auth.invite) or self-registers
 --   2. Parent verifies OTP via delivery_address (auth.otp)
 --   3. Parent sets password → auth.user row created
@@ -19,6 +19,16 @@
 --   6. Parent submits onboarding application for student admission
 --   7. Once approved, student_enrollment (+ student_subjects) rows
 --      capture the student's actual class/section/subjects per year
+--
+-- Account creation flow (teacher-invited — student already enrolled):
+--   See docs/API_V4.0_PARENT_ONBOARDING.md. A teacher invites the parent
+--   of a student already placed in their class/section — parents.student
+--   + student_enrollment are created directly (no onboarding_application
+--   review). One invite covers exactly one student — invite_student links
+--   the two so the parent's activation screen can auto-fill the student
+--   it's for, without adding a parents-specific column onto the generic,
+--   shared auth.invite table. Parent activation (OTP, password) is
+--   otherwise identical to the self-service flow above.
 --
 -- Tables:
 --   parent               — Core parent/guardian profile
@@ -32,11 +42,13 @@
 --   application_document — Documents uploaded for an application
 --   student_enrollment   — Student's class/section for a given academic year
 --   student_subjects     — Subjects a student takes for a given enrollment
+--   invite_student       — Links a teacher-sent parent invite to the one student it's for
 --
 -- Cross-schema FKs (within this tenant DB):
 --   parent.user_id                          → auth.user(id)
 --   onboarding_application.reviewed_by_user_id → auth.user(id)
 --   application_document.verified_by_user_id   → auth.user(id)
+--   invite_student.invite_id                   → auth.invite(id)
 --
 -- Masters FKs (app-layer enforced):
 --   parent.gender_id                    → masters.genders(id)
@@ -51,6 +63,7 @@
 --   student_enrollment.class_id         → masters.classes(id)
 --   student_enrollment.section_id       → masters.sections(id)
 --   student_subjects.subject_id         → masters.subjects(id)
+--   invite_student.relationship_type_id → masters.relationship_type(id)
 --
 -- Note on grade_applying_id vs student_enrollment:
 --   masters.grade is year-scoped (name + level + academic_year) and is
@@ -101,13 +114,19 @@ COMMENT ON COLUMN parents.parent.gender_id IS 'FK to masters.genders(id). Enforc
 -- ── Student ─────────────────────────────────────────────────────
 -- One row per student. Students do not have their own login at this
 -- stage — they are registered by their parent/guardian.
+-- date_of_birth is nullable: in the teacher-invited flow
+-- (docs/API_V4.0_PARENT_ONBOARDING.md § Phase 4) the teacher creates this
+-- row knowing only the student's name and class/section — DOB and the
+-- rest of the profile are collected from the parent later, at Phase 5
+-- Step 5. The self-service admission flow still collects DOB up front;
+-- it just isn't guaranteed to exist the moment the row is created.
 CREATE TABLE parents.student (
     id                   UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id            UUID         NOT NULL REFERENCES management.management_table(tenant_id),
     blood_group_id       UUID,        -- → masters.blood_group(id)
     grade_applying_id    UUID,        -- → masters.grade(id)
     name                 VARCHAR(150) NOT NULL,
-    date_of_birth        DATE         NOT NULL,
+    date_of_birth        DATE,
     gender_id            UUID,        -- → masters.genders(id)
     nationality          VARCHAR(100),
     previous_school_name VARCHAR(255),
@@ -346,3 +365,28 @@ CREATE INDEX idx_student_subjects_enrollment ON parents.student_subjects (studen
 
 COMMENT ON TABLE  parents.student_subjects IS 'Subjects a student takes for a given enrollment year. Scoped per-enrollment, not per-student, since subject choices can change on promotion.';
 COMMENT ON COLUMN parents.student_subjects.subject_id IS 'FK to masters.subjects(id). Enforced at app layer.';
+
+
+-- ── Invite Student ──────────────────────────────────────────────
+-- Links one auth.invite (target_role='parent') to the single student it
+-- was created for — one invite always covers exactly one student (see
+-- docs/API_V4.0_PARENT_ONBOARDING.md). This exists as its own table
+-- rather than a column on auth.invite so the generic, shared invite
+-- table (also used by chain_admin/tenant_admin/teacher invites) doesn't
+-- need a parent-specific field. At Phase 5 Step 1 (invite verify), the
+-- parent's activation screen looks this up to auto-fill which student
+-- the account is being created for. invite_id is a real FK (not
+-- app-layer-only) since auth.invite is a core entity table in this same
+-- tenant DB, not a masters.* lookup table.
+CREATE TABLE parents.invite_student (
+    id                   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    invite_id            UUID        NOT NULL UNIQUE REFERENCES auth.invite(id) ON DELETE CASCADE,
+    student_id           UUID        NOT NULL REFERENCES parents.student(id) ON DELETE CASCADE,
+    relationship_type_id UUID        NOT NULL,  -- → masters.relationship_type(id)
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_invite_student_student ON parents.invite_student (student_id);
+
+COMMENT ON TABLE  parents.invite_student IS 'Links an auth.invite (target_role=parent) to the one student it was created for. UNIQUE(invite_id) — one invite, one student, by design.';
+COMMENT ON COLUMN parents.invite_student.relationship_type_id IS 'FK to masters.relationship_type(id). Enforced at app layer.';

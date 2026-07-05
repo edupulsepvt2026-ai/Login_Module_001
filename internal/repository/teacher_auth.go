@@ -126,43 +126,25 @@ func (r *TeacherAuthRepository) GetClassesWithSections(ctx context.Context, pool
 }
 
 func (r *TeacherAuthRepository) ExistsPincode(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
-	return r.exists(ctx, pool, "masters.pincodes", id)
+	return existsByID(ctx, pool, "masters.pincodes", id)
 }
 
 func (r *TeacherAuthRepository) ExistsGender(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
-	return r.exists(ctx, pool, "masters.genders", id)
+	return existsByID(ctx, pool, "masters.genders", id)
 }
 
 func (r *TeacherAuthRepository) ExistsQualification(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
-	return r.exists(ctx, pool, "masters.qualifications", id)
-}
-
-func (r *TeacherAuthRepository) exists(ctx context.Context, pool *pgxpool.Pool, table, id string) (bool, error) {
-	var ok bool
-	err := pool.QueryRow(ctx, fmt.Sprintf(`SELECT EXISTS(SELECT 1 FROM %s WHERE id = $1::uuid)`, table), id).Scan(&ok)
-	if err != nil {
-		return false, fmt.Errorf("failed to validate %s: %w", table, err)
-	}
-	return ok, nil
+	return existsByID(ctx, pool, "masters.qualifications", id)
 }
 
 // CountSubjects returns how many of the given IDs actually exist in masters.subjects.
 func (r *TeacherAuthRepository) CountSubjects(ctx context.Context, pool *pgxpool.Pool, ids []string) (int, error) {
-	return r.countByIDs(ctx, pool, "masters.subjects", ids)
+	return countByIDs(ctx, pool, "masters.subjects", ids)
 }
 
 // CountLanguages returns how many of the given IDs actually exist in masters.languages.
 func (r *TeacherAuthRepository) CountLanguages(ctx context.Context, pool *pgxpool.Pool, ids []string) (int, error) {
-	return r.countByIDs(ctx, pool, "masters.languages", ids)
-}
-
-func (r *TeacherAuthRepository) countByIDs(ctx context.Context, pool *pgxpool.Pool, table string, ids []string) (int, error) {
-	var count int
-	err := pool.QueryRow(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE id = ANY($1::uuid[])`, table), ids).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("failed to validate %s: %w", table, err)
-	}
-	return count, nil
+	return countByIDs(ctx, pool, "masters.languages", ids)
 }
 
 // ValidateClassSections checks that every class_id and section_id referenced
@@ -186,7 +168,7 @@ func (r *TeacherAuthRepository) ValidateClassSections(ctx context.Context, pool 
 		sectionIDs = append(sectionIDs, id)
 	}
 
-	validClasses, err := r.countByIDs(ctx, pool, "masters.classes", classIDs)
+	validClasses, err := countByIDs(ctx, pool, "masters.classes", classIDs)
 	if err != nil {
 		return false, err
 	}
@@ -194,7 +176,7 @@ func (r *TeacherAuthRepository) ValidateClassSections(ctx context.Context, pool 
 		return false, nil
 	}
 
-	validSections, err := r.countByIDs(ctx, pool, "masters.sections", sectionIDs)
+	validSections, err := countByIDs(ctx, pool, "masters.sections", sectionIDs)
 	if err != nil {
 		return false, err
 	}
